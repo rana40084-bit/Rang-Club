@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rang Club - Double Sir</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * { box-sizing: border-box; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; }
+        body { background: #0b3d24; color: white; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        header { background: #062415; padding: 12px; text-align: center; font-size: 20px; font-weight: bold; color: #f1c40f; border-bottom: 2px solid #f1c40f; }
+        
+        /* Lobby */
+        #lobby { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 15px; padding: 20px; }
+        input { padding: 12px; border-radius: 8px; border: none; width: 250px; font-size: 16px; }
+        button { padding: 12px 24px; border-radius: 8px; border: none; background: #f1c40f; color: #062415; font-weight: bold; font-size: 16px; cursor: pointer; }
+        
+        /* Game Table */
+        #gameArea { display: none; flex: 1; flex-direction: column; justify-content: space-between; padding: 10px; position: relative; }
+        .top-bar { display: flex; justify-content: space-between; background: rgba(0,0,0,0.4); padding: 8px 12px; border-radius: 8px; font-size: 14px; }
+        .trump-badge { background: #e74c3c; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
+        
+        .table-center { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 10px; }
+        .played-cards { display: flex; gap: 10px; min-height: 90px; }
+        
+        .card { width: 55px; height: 80px; background: white; color: black; border-radius: 6px; display: flex; flex-direction: column; justify-content: center; align-items: center; font-weight: bold; font-size: 18px; box-shadow: 0 4px 6px rgba(0,0,0,0.4); cursor: pointer; user-select: none; }
+        .card.red { color: #d63031; }
+        .hand { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; padding: 10px 0; }
+        
+        /* Trump Modal */
+        #trumpModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; flex-direction: column; gap: 15px; z-index: 100; }
+        .suit-btns { display: flex; gap: 15px; }
+        .suit-btn { font-size: 30px; padding: 15px 20px; background: white; border-radius: 10px; }
+
+        /* Chat & Voice Controls */
+        .comms-bar { display: flex; gap: 8px; background: #062415; padding: 8px; align-items: center; }
+        #chatBox { position: fixed; bottom: 55px; right: 10px; width: 250px; height: 180px; background: rgba(0,0,0,0.85); border-radius: 8px; display: none; flex-direction: column; padding: 8px; z-index: 50; }
+        #messages { flex: 1; overflow-y: auto; font-size: 13px; margin-bottom: 5px; }
+        .mic-active { background: #2ecc71 !important; color: white !important; }
+    </style>
+</head>
+<body>
+
+<header>♠️ Rang Club (Double Sir) ♥️</header>
+
+<!-- Lobby Screen -->
+<div id="lobby">
+    <input type="text" id="playerName" placeholder="Apna Naam Likhein" />
+    <input type="text" id="roomCode" placeholder="Room Code (e.g. OFFICE1)" />
+    <button onclick="joinGame()">Room Join Karein</button>
+    <p id="lobbyStatus" style="color: #f1c40f;"></p>
+</div>
+
+<!-- Trump Selection -->
+<div id="trumpModal">
+    <h2>Rang (Trump) Select Karein:</h2>
+    <div class="suit-btns">
+        <button class="suit-btn" onclick="chooseTrump('♠')">♠</button>
+        <button class="suit-btn" style="color:red" onclick="chooseTrump('♥')">♥</button>
+        <button class="suit-btn" style="color:red" onclick="chooseTrump('♦')">♦</button>
+        <button class="suit-btn" onclick="chooseTrump('♣')">♣</button>
+    </div>
+</div>
+
+<!-- Main Game Screen -->
+<div id="gameArea">
+    <div class="top-bar">
+        <div>Team A: <span id="scoreA">0</span> | Team B: <span id="scoreB">0</span></div>
+        <div>Pending: <span id="pendingSirs">0</span></div>
+        <div>Rang: <span id="trumpDisplay" class="trump-badge">?</span></div>
+    </div>
+
+    <div class="table-center">
+        <p id="statusText" style="color: #f1c40f; font-weight: bold; text-align: center;">Waiting...</p>
+        <div class="played-cards" id="tableCards"></div>
+    </div>
+
+    <div class="hand" id="playerHand"></div>
+</div>
+
+<!-- Chat Box -->
+<div id="chatBox">
+    <div id="messages"></div>
+    <div style="display:flex; gap:4px;">
+        <input type="text" id="chatInput" placeholder="Message..." style="width:100%; padding:6px; font-size:13px;" />
+        <button onclick="sendChat()" style="padding:6px 10px; font-size:13px;">Send</button>
+    </div>
+</div>
+
+<!-- Bottom Voice & Chat Bar -->
+<div class="comms-bar" id="commsBar" style="display:none;">
+    <button id="micBtn" onclick="toggleMic()" style="padding:8px 12px; font-size:14px;">🎤 Mic Off</button>
+    <button onclick="toggleChat()" style="padding:8px 12px; font-size:14px;">💬 Chat</button>
+</div>
+
+<script>
+    const socket = io();
+    let myIndex = -1;
+    let localStream;
+    let peers = {};
+
+    function joinGame() {
+        const name = document.getElementById('playerName').value.trim();
+        const code = document.getElementById('roomCode').value.trim().toUpperCase();
+        if (!name || !code) return alert('Naam aur Room Code dono likhein!');
+        socket.emit('joinRoom', { roomCode: code, playerName: name });
+    }
+
+    socket.on('updatePlayers', (players) => {
+        document.getElementById('lobbyStatus').innerText = `Players Joined: ${players.length}/4 (${players.map(p => p.name).join(', ')})`;
+        const me = players.find(p => p.id === socket.id);
+        if (me) myIndex = me.index;
+
+        if (players.length === 4) {
+            document.getElementById('lobby').style.display = 'none';
+            document.getElementById('gameArea').style.display = 'flex';
+            document.getElementById('commsBar').style.display = 'flex';
+            setupVoice(players);
+        }
+    });
+
+    socket.on('dealCards', ({ hand, phase, isTrumpSelector, trump }) => {
+        renderHand(hand);
+        if (phase === 'selectTrump' && isTrumpSelector) {
+            document.getElementById('trumpModal').style.display = 'flex';
+        }
+        if (trump) document.getElementById('trumpDisplay').innerText = trump;
+    });
+
+    function chooseTrump(suit) {
+        document.getElementById('trumpModal').style.display = 'none';
+        socket.emit('selectTrump', suit);
+    }
+
+    socket.on('trumpSelected', (suit) => {
+        document.getElementById('trumpDisplay').innerText = suit;
+    });
+
+    socket.on('turnUpdate', (turnIndex) => {
+        document.getElementById('statusText').innerText = turnIndex === myIndex ? "Aap ki Baari Hai!" : `Player ${turnIndex + 1} ki baari hai...`;
+    });
+
+    socket.on('updateHand', renderHand);
+
+    function renderHand(hand) {
+        const handDiv = document.getElementById('playerHand');
+        handDiv.innerHTML = '';
+        hand.forEach((card, idx) => {
+            const isRed = card.suit === '♥' || card.suit === '♦';
+            const div = document.createElement('div');
+            div.className = `card ${isRed ? 'red' : ''}`;
+            div.innerHTML = `<span>${card.value}</span><span>${card.suit}</span>`;
+            div.onclick = () => socket.emit('playCard', idx);
+            handDiv.appendChild(div);
+        });
+    }
+
+    socket.on('cardPlayed', (cards) => {
+        const table = document.getElementById('tableCards');
+        table.innerHTML = '';
+        cards.forEach(item => {
+            const isRed = item.card.suit === '♥' || item.card.suit === '♦';
+            table.innerHTML += `<div style="text-align:center;">
+                <div class="card ${isRed ? 'red' : ''}"><span>${item.card.value}</span><span>${item.card.suit}</span></div>
+                <small>${item.playerName}</small>
+            </div>`;
+        });
+    });
+
+    socket.on('trickEnded', ({ scores, pendingSirs }) => {
+        document.getElementById('tableCards').innerHTML = '';
+        document.getElementById('scoreA').innerText = scores.teamA;
+        document.getElementById('scoreB').innerText = scores.teamB;
+        document.getElementById('pendingSirs').innerText = pendingSirs;
+    });
+
+    socket.on('gameStatus', (msg) => document.getElementById('statusText').innerText = msg);
+    socket.on('errorMsg', (msg) => alert(msg));
+    socket.on('gameOver', (msg) => alert(msg));
+
+    // Text Chat Logic
+    function toggleChat() {
+        const box = document.getElementById('chatBox');
+        box.style.display = box.style.display === 'flex' ? 'none' : 'flex';
+    }
+
+    function sendChat() {
+        const input = document.getElementById('chatInput');
+        if (!input.value.trim()) return;
+        socket.emit('chatMessage', input.value);
+        input.value = '';
+    }
+
+    socket.on('chatMessage', ({ sender, text }) => {
+        const msgs = document.getElementById('messages');
+        msgs.innerHTML += `<div><b>${sender}:</b> ${text}</div>`;
+        msgs.scrollTop = msgs.scrollHeight;
+    });
+
+    // Voice Chat (WebRTC Peer-to-Peer)
+    async function setupVoice(players) {
+        try {
+            localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            localStream.getAudioTracks()[0].enabled = false; // Default muted
+
+            players.forEach(p => {
+                if (p.id !== socket.id && myIndex < p.index) {
+                    createPeer(p.id, true);
+                }
+            });
+        } catch (e) {
+            console.log('Mic permission denied');
+        }
+    }
+
+    function createPeer(targetId, initiator) {
+        const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:://google.com' }] });
+        peers[targetId] = pc;
+        if (localStream) localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
