@@ -5,9 +5,15 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+    cors: { origin: "*", methods: ["GET", "POST"] }
+});
+
 app.use(express.static(__dirname));
-app.use(express.static(path.join(__dirname, 'public')));
+
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
 
 const rooms = {};
 const SUITS = ['♠', '♥', '♦', '♣'];
@@ -27,24 +33,16 @@ io.on('connection', (socket) => {
     socket.on('joinRoom', ({ roomCode, playerName }) => {
         if (!rooms[roomCode]) {
             rooms[roomCode] = {
-                players: [],
-                deck: [],
-                trump: null,
-                turn: 0,
-                tableCards: [],
-                leadSuit: null,
-                pendingSirs: 0,
-                lastWinnerTeam: null,
-                scores: { teamA: 0, teamB: 0 } // Team A: 0 & 2, Team B: 1 & 3
+                players: [], deck: [], trump: null, turn: 0,
+                tableCards: [], leadSuit: null, pendingSirs: 0,
+                lastWinnerTeam: null, scores: { teamA: 0, teamB: 0 }
             };
         }
-
         const room = rooms[roomCode];
         if (room.players.length >= 4) {
             socket.emit('errorMsg', 'Room full hai! Sirf 4 players khel sakte hain.');
             return;
         }
-
         const playerIndex = room.players.length;
         const team = playerIndex % 2 === 0 ? 'Team A' : 'Team B';
         room.players.push({ id: socket.id, name: playerName, index: playerIndex, team, hand: [] });
@@ -53,10 +51,7 @@ io.on('connection', (socket) => {
         socket.playerIndex = playerIndex;
 
         io.to(roomCode).emit('updatePlayers', room.players);
-
-        if (room.players.length === 4) {
-            startGame(roomCode);
-        }
+        if (room.players.length === 4) startGame(roomCode);
     });
 
     function startGame(roomCode) {
@@ -68,26 +63,22 @@ io.on('connection', (socket) => {
         room.trump = null;
         room.turn = 0;
 
-        // Pehle 5 cards har player ko dein
         room.players.forEach((p, idx) => {
             p.hand = room.deck.slice(idx * 5, (idx + 1) * 5);
             io.to(p.id).emit('dealCards', { hand: p.hand, phase: 'selectTrump', isTrumpSelector: idx === 0 });
         });
-        io.to(roomCode).emit('gameStatus', `${room.players[0].name} Rang (Trump) select karega...`);
+        io.to(roomCode).emit('gameStatus', `${room.players.name} Rang (Trump) select karega...`);
     }
 
     socket.on('selectTrump', (suit) => {
         const room = rooms[socket.roomCode];
         if (!room || socket.playerIndex !== 0) return;
-
         room.trump = suit;
-        // Baqi 8 cards (4 + 4) har player ko dein
         room.players.forEach((p, idx) => {
             const extraCards = room.deck.slice(20 + idx * 8, 20 + (idx + 1) * 8);
             p.hand = p.hand.concat(extraCards);
             io.to(p.id).emit('dealCards', { hand: p.hand, phase: 'playing', trump: suit });
         });
-
         io.to(socket.roomCode).emit('trumpSelected', suit);
         io.to(socket.roomCode).emit('turnUpdate', room.turn);
     });
@@ -95,12 +86,10 @@ io.on('connection', (socket) => {
     socket.on('playCard', (cardIndex) => {
         const room = rooms[socket.roomCode];
         if (!room || socket.playerIndex !== room.turn) return;
-
         const player = room.players[socket.playerIndex];
         const card = player.hand[cardIndex];
         if (!card) return;
 
-        // Suit follow check
         if (room.tableCards.length > 0) {
             const hasLeadSuit = player.hand.some(c => c.suit === room.leadSuit);
             if (hasLeadSuit && card.suit !== room.leadSuit) {
@@ -127,24 +116,18 @@ io.on('connection', (socket) => {
     function evaluateTrick(roomCode) {
         const room = rooms[roomCode];
         if (!room) return;
-
-        let winningPlay = room.tableCards[0];
+        let winningPlay = room.tableCards;
         for (let i = 1; i < room.tableCards.length; i++) {
             const current = room.tableCards[i];
             const isCurrentTrump = current.card.suit === room.trump;
             const isWinningTrump = winningPlay.card.suit === room.trump;
-
-            if (isCurrentTrump && !isWinningTrump) {
-                winningPlay = current;
-            } else if (current.card.suit === winningPlay.card.suit && current.card.rank > winningPlay.card.rank) {
-                winningPlay = current;
-            }
+            if (isCurrentTrump && !isWinningTrump) winningPlay = current;
+            else if (current.card.suit === winningPlay.card.suit && current.card.rank > winningPlay.card.rank) winningPlay = current;
         }
 
         const winnerTeam = winningPlay.playerIndex % 2 === 0 ? 'Team A' : 'Team B';
         room.pendingSirs += 1;
 
-        // DOUBLE SIR LOGIC: Lagatar 2 haath jeetne par score milta hai
         if (room.lastWinnerTeam === winnerTeam) {
             if (winnerTeam === 'Team A') room.scores.teamA += room.pendingSirs;
             else room.scores.teamB += room.pendingSirs;
@@ -159,16 +142,14 @@ io.on('connection', (socket) => {
         room.tableCards = [];
         room.leadSuit = null;
         room.turn = winningPlay.playerIndex;
-
         io.to(roomCode).emit('trickEnded', { scores: room.scores, pendingSirs: room.pendingSirs, nextTurn: room.turn });
 
-        if (room.players[0].hand.length === 0) {
+        if (room.players.hand.length === 0) {
             const finalWinner = room.scores.teamA > room.scores.teamB ? 'Team A' : 'Team B';
             io.to(roomCode).emit('gameOver', `Game Khatam! ${finalWinner} Jeet Gayi!`);
         }
     }
 
-    // Text Chat
     socket.on('chatMessage', (msg) => {
         const room = rooms[socket.roomCode];
         if (!room) return;
@@ -176,18 +157,10 @@ io.on('connection', (socket) => {
         io.to(socket.roomCode).emit('chatMessage', { sender: player.name, text: msg });
     });
 
-    // WebRTC Voice Chat Signaling
     socket.on('voiceSignal', (data) => {
         io.to(data.to).emit('voiceSignal', { from: socket.id, signal: data.signal });
-    });
-
-    socket.on('disconnect', () => {
-        if (socket.roomCode && rooms[socket.roomCode]) {
-            delete rooms[socket.roomCode];
-            io.to(socket.roomCode).emit('errorMsg', 'Koi player game chor gaya. Room reset ho gaya hai.');
-        }
     });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Rang Club server running on port ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`Rang Club server running on port ${PORT}`));
