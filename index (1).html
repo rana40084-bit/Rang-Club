@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Rang Club Pro - Double Sir</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <style>
+        * { box-sizing: border-box; font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 0; }
+        body { background: radial-gradient(circle at center, #115735 0%, #062415 100%); color: white; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        header { background: rgba(6, 36, 21, 0.95); padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f1c40f; box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+        header h1 { font-size: 18px; color: #f1c40f; letter-spacing: 0.5px; }
+        .badge-conn { font-size: 11px; padding: 3px 8px; border-radius: 12px; background: rgba(0,0,0,0.4); }
+
+        /* Lobby & Team Room */
+        #lobby { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 12px; padding: 16px; overflow-y: auto; }
+        .card-box { background: rgba(0, 0, 0, 0.45); border: 1px solid rgba(241, 196, 15, 0.3); border-radius: 14px; padding: 18px; width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.4); }
+        input { padding: 12px; border-radius: 8px; border: 1px solid #2ecc71; background: rgba(255,255,255,0.95); color: #111; width: 100%; font-size: 15px; font-weight: 600; }
+        button { padding: 12px; border-radius: 8px; border: none; background: #f1c40f; color: #062415; font-weight: bold; font-size: 15px; cursor: pointer; transition: transform 0.1s; }
+        button:active { transform: scale(0.97); }
+        button.bot-btn { background: #2ecc71; color: #062415; }
+
+        /* Team Seating Preview in Room */
+        #teamRoomBox { display: none; width: 100%; max-width: 380px; background: rgba(0,0,0,0.55); border: 2px solid #f1c40f; border-radius: 14px; padding: 15px; }
+        .teams-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+        .team-col { background: rgba(255,255,255,0.08); border-radius: 10px; padding: 10px; text-align: center; }
+        .team-col.team-a { border-top: 4px solid #3498db; }
+        .team-col.team-b { border-top: 4px solid #e74c3c; }
+        .team-title { font-weight: bold; font-size: 14px; margin-bottom: 8px; color: #f1c40f; }
+        .seat-slot { background: rgba(0,0,0,0.4); padding: 8px; border-radius: 6px; margin-bottom: 6px; font-size: 13px; border: 1px dashed rgba(255,255,255,0.2); }
+        .seat-slot.filled { border: 1px solid #2ecc71; background: rgba(46, 204, 113, 0.2); font-weight: bold; }
+
+        /* Shuffling Overlay */
+        #shuffleOverlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 200; flex-direction: column; justify-content: center; align-items: center; gap: 20px; }
+        .deck-anim { position: relative; width: 80px; height: 110px; }
+        .anim-card { position: absolute; width: 70px; height: 100px; background: linear-gradient(135deg, #c0392b, #8e44ad); border: 3px solid white; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.6); animation: shuffleMove 0.6s infinite alternate ease-in-out; }
+        .anim-card:nth-child(2) { animation-delay: 0.15s; background: linear-gradient(135deg, #2980b9, #2c3e50); }
+        .anim-card:nth-child(3) { animation-delay: 0.3s; background: linear-gradient(135deg, #d35400, #f39c12); }
+        @keyframes shuffleMove {
+            0% { transform: translateX(-25px) rotate(-12deg); }
+            100% { transform: translateX(25px) rotate(12deg); }
+        }
+
+        /* Game Area */
+        #gameArea { display: none; flex: 1; flex-direction: column; justify-content: space-between; padding: 8px; position: relative; }
+        .score-header { display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.5); padding: 6px 10px; border-radius: 10px; font-size: 12px; border: 1px solid rgba(255,255,255,0.15); }
+        .team-pill { padding: 4px 8px; border-radius: 6px; font-weight: bold; }
+        .pill-a { background: rgba(52, 152, 219, 0.3); border: 1px solid #3498db; }
+        .pill-b { background: rgba(231, 76, 60, 0.3); border: 1px solid #e74c3c; }
+        .trump-badge { background: #f1c40f; color: #062415; padding: 3px 10px; border-radius: 6px; font-weight: 900; font-size: 15px; }
+
+        /* Table Layout with 4 Seats */
+        .table-arena { flex: 1; display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: 6px 0; position: relative; }
+        .seat-badge { background: rgba(0,0,0,0.6); padding: 4px 10px; border-radius: 20px; font-size: 12px; border: 1px solid rgba(255,255,255,0.2); display: inline-flex; align-items: center; gap: 5px; }
+        .seat-badge.active-turn { border-color: #f1c40f; box-shadow: 0 0 10px #f1c40f; background: rgba(241, 196, 15, 0.25); }
+        .dot-a { width: 8px; height: 8px; border-radius: 50%; background: #3498db; display: inline-block; }
+        .dot-b { width: 8px; height: 8px; border-radius: 50%; background: #e74c3c; display: inline-block; }
+
+        .middle-row { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 0 4px; }
+        .center-felt { flex: 1; min-height: 115px; margin: 0 8px; background: rgba(0,0,0,0.25); border: 2px dashed rgba(241, 196, 15, 0.3); border-radius: 16px; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 6px; }
+        .played-cards { display: flex; gap: 6px; justify-content: center; align-items: center; min-height: 75px; }
+
+        .card { width: 50px; height: 74px; background: white; color: #111; border-radius: 6px; display: flex; flex-direction: column; justify-content: center; align-items: center; font-weight: bold; font-size: 16px; box-shadow: 0 3px 8px rgba(0,0,0,0.5); cursor: pointer; user-select: none; transition: transform 0.15s; border: 1px solid #ccc; }
+        .card:hover { transform: translateY(-6px); }
+        .card.red { color: #d63031; }
+        .card.table-card { width: 46px; height: 68px; font-size: 14px; animation: popIn 0.2s ease-out; }
+        @keyframes popIn { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+        .hand-controls { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 0 6px; margin-bottom: 4px; }
+        .sort-btn { padding: 4px 10px; font-size: 12px; background: rgba(255,255,255,0.15); color: white; border: 1px solid rgba(255,255,255,0.3); border-radius: 6px; }
+        .hand { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; padding-bottom: 4px; min-height: 80px; }
+
+        /* Modals */
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); justify-content: center; align-items: center; flex-direction: column; gap: 15px; z-index: 150; padding: 20px; text-align: center; }
+        .suit-btns { display: flex; gap: 12px; }
+        .suit-btn { font-size: 32px; padding: 14px 18px; background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+
+        /* Bottom Bar & Chat */
+        .comms-bar { display: flex; justify-content: space-between; background: #04180e; padding: 8px 12px; align-items: center; border-top: 1px solid rgba(255,255,255,0.1); }
+        .comms-bar button { padding: 7px 12px; font-size: 13px; }
+        #chatBox { position: fixed; bottom: 52px; right: 10px; width: 260px; height: 200px; background: rgba(6, 20, 14, 0.95); border: 1px solid #f1c40f; border-radius: 10px; display: none; flex-direction: column; padding: 8px; z-index: 120; }
+        #messages { flex: 1; overflow-y: auto; font-size: 12px; margin-bottom: 6px; display: flex; flex-direction: column; gap: 4px; }
+        .mic-active { background: #2ecc71 !important; color: #062415 !important; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>♠️ Rang Club <span style="font-size:12px; color:#2ecc71;">(Double Sir)</span></h1>
+    <span id="connStatus" class="badge-conn" style="color:#f1c40f;">Connecting...</span>
+</header>
+
+<!-- Lobby Screen -->
+<div id="lobby">
+    <div id="joinForm" class="card-box">
+        <input type="text" id="playerName" placeholder="Apna Naam Likhein (e.g. Faizan)" />
+        <input type="text" id="roomCode" placeholder="Room Code (e.g. OFFICE1)" />
+        <button onclick="joinGame()">👥 Room Join Karein (4 Players)</button>
+        <button class="bot-btn" onclick="startSoloTest()">🤖 Akelay Khelein (Bots ke Sath)</button>
+    </div>
+
+    <!-- Team Seating Room -->
+    <div id="teamRoomBox">
+        <h3 style="text-align:center; color:#2ecc71;">Room: <span id="displayRoomCode"></span> (<span id="playerCount">0</span>/4)</h3>
+        <p style="text-align:center; font-size:12px; color:#ccc; margin-top:4px;">Partners aamne-saamne baithenge</p>
+        <div class="teams-grid">
+            <div class="team-col team-a">
+                <div class="team-title">🔵 Team A</div>
+                <div id="slot0" class="seat-slot">Seat 1 (Empty)</div>
+                <div id="slot2" class="seat-slot">Seat 3 (Empty)</div>
+            </div>
+            <div class="team-col team-b">
+                <div class="team-title">🔴 Team B</div>
+                <div id="slot1" class="seat-slot">Seat 2 (Empty)</div>
+                <div id="slot3" class="seat-slot">Seat 4 (Empty)</div>
+            </div>
+        </div>
+        <p id="waitingHint" style="text-align:center; color:#f1c40f; font-size:13px; margin-top:12px; font-weight:bold;">Baqi colleagues ka intezar hai...</p>
+    </div>
+</div>
+
+<!-- Shuffling Animation -->
+<div id="shuffleOverlay">
+    <div class="deck-anim">
+        <div class="anim-card"></div>
+        <div class="anim-card"></div>
+        <div class="anim-card"></div>
+    </div>
+    <h2 id="shuffleText" style="color:#f1c40f;">Cards Shuffle Ho Rahe Hain...</h2>
+</div>
+
+<!-- Trump Selection Modal -->
+<div id="trumpModal" class="modal-overlay">
+    <h2 style="color:#f1c40f;">Rang (Trump) Select Karein:</h2>
+    <div class="suit-btns">
+        <button class="suit-btn" onclick="chooseTrump('♠')">♠</button>
+        <button class="suit-btn" style="color:#d63031" onclick="chooseTrump('♥')">♥</button>
+        <button class="suit-btn" style="color:#d63031" onclick="chooseTrump('♦')">♦</button>
+        <button class="suit-btn" onclick="chooseTrump('♣')">♣</button>
+    </div>
+</div>
+
+<!-- Game Over & Rematch Modal -->
+<div id="gameOverModal" class="modal-overlay">
+    <h1 id="winnerBanner" style="color:#f1c40f; font-size:26px;">🏆 Team A Jeet Gayi!</h1>
+    <p id="finalScoreText" style="font-size:16px;"></p>
+    <button onclick="requestRematch()" style="width:220px; font-size:16px;">🔄 Dobara Khelein (Rematch)</button>
+</div>
+
+<!-- Main Game Table -->
+<div id="gameArea">
+    <div class="score-header">
+        <div class="team-pill pill-a">🔵 Team A: <span id="scoreA">0</span></div>
+        <div style="text-align:center;">
+            <div style="font-size:10px; color:#ccc;">PENDING</div>
+            <div id="pendingSirs" style="font-weight:bold; color:#f1c40f; font-size:14px;">0</div>
+        </div>
+        <div>Rang: <span id="trumpDisplay" class="trump-badge">?</span></div>
+        <div class="team-pill pill-b">🔴 Team B: <span id="scoreB">0</span></div>
+    </div>
+
+    <div class="table-arena">
+        <!-- Partner (Opposite Seat) -->
+        <div id="seatPartner" class="seat-badge">Partner</div>
+
+        <div class="middle-row">
+            <!-- Left Opponent -->
+            <div id="seatLeft" class="seat-badge">Left</div>
+
+            <!-- Center Cards -->
+            <div class="center-felt">
+                <p id="statusText" style="color:#f1c40f; font-size:12px; font-weight:bold; text-align:center; margin-bottom:4px;">Waiting...</p>
+                <div class="played-cards" id="tableCards"></div>
+            </div>
+
+            <!-- Right Opponent -->
+            <div id="seatRight" class="seat-badge">Right</div>
+        </div>
+
+        <!-- My Hand Header -->
+        <div class="hand-controls">
+            <div id="seatMe" class="seat-badge">You</div>
+            <button class="sort-btn" onclick="sortMyHand()">📶 Sort Cards</button>
+        </div>
+    </div>
+
+    <div class="hand" id="playerHand"></div>
+</div>
+
+<!-- Chat Popup -->
+<div id="chatBox">
+    <div id="messages"></div>
+    <div style="display:flex; gap:4px;">
+        <input type="text" id="chatInput" placeholder="Message likhein..." style="padding:6px; font-size:12px;" onkeypress="if(event.key==='Enter') sendChat()" />
+        <button onclick="sendChat()" style="padding:6px 10px; font-size:12px;">Send</button>
+    </div>
+</div>
+
+<!-- Bottom Comms Bar -->
+<div class="comms-bar" id="commsBar" style="display:none;">
+    <button id="micBtn" onclick="toggleMic()">🎤 Mic Off</button>
+    <button id="soundBtn" onclick="toggleSound()">🔊 Sound On</button>
+    <button onclick="toggleChat()">💬 Chat <span id="chatBadge" style="display:none; background:red; color:white; padding:1px 5px; border-radius:10px; font-size:10px;">!</span></button>
+</div>
+
+<script>
+    const SERVER_URL = "https://rang-club-production.up.railway.app";
+    const socket = io(SERVER_URL, { transports: ['polling', 'websocket'] });
+
+    let myIndex = -1;
+    let allPlayers = [];
+    let currentHand = [];
+    let localStream = null;
+    let peers = {};
+    let soundEnabled = true;
+
+    // Web Audio Sound Synthesizer (No external MP3 needed!)
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playTone(type) {
+        if (!soundEnabled) return;
+        try {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            const now = audioCtx.currentTime;
+
+            if (type === 'card') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(320, now);
+                osc.frequency.exponentialRampToValueAtTime(90, now + 0.08);
+                gain.gain.setValueAtTime(0.25, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+                osc.start(now); osc.stop(now + 0.09);
+            } else if (type === 'shuffle') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(200, now);
+                osc.frequency.linearRampToValueAtTime(450, now + 0.15);
+                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                osc.start(now); osc.stop(now + 0.16);
+            } else if (type === 'win') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(440, now);
+                osc.frequency.setValueAtTime(554, now + 0.1);
+                osc.frequency.setValueAtTime(659, now + 0.2);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+                osc.start(now); osc.stop(now + 0.41);
+            } else if (type === 'turn') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(600, now);
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                osc.start(now); osc.stop(now + 0.11);
+            }
+        } catch (e) {}
+    }
+
+    function toggleSound() {
+        soundEnabled = !soundEnabled;
+        document.getElementById('soundBtn').innerText = soundEnabled ? '🔊 Sound On' : '🔇 Sound Off';
+    }
+
+    socket.on('connect', () => {
+        document.getElementById('connStatus').innerText = '✅ Online';
+        document.getElementById('connStatus').style.color = '#2ecc71';
+    });
+
+    socket.on('connect_error', () => {
+        document.getElementById('connStatus').innerText = '❌ Offline';
+        document.getElementById('connStatus').style.color = '#e74c3c';
+    });
+
+    function joinGame() {
+        const name = document.getElementById('playerName').value.trim();
+        const code = document.getElementById('roomCode').value.trim().toUpperCase();
+        if (!name || !code) return alert('Apna Naam aur Room Code dono likhein!');
+        document.getElementById('joinForm').style.display = 'none';
+        document.getElementById('teamRoomBox').style.display = 'block';
+        document.getElementById('displayRoomCode').innerText = code;
+        socket.emit('joinRoom', { roomCode: code, playerName: name });
+    }
+
+    function addBot(testCode, num) {
+        const bot = io(SERVER_URL, { transports: ['polling', 'websocket'] });
+        let botHand = [];
+        let leadSuit = null;
+        bot.emit('joinRoom', { roomCode: testCode, playerName: ['Ali (Bot)', 'Usman (Bot)', 'Bilal (Bot)'][num - 1] });
+        bot.on('dealCards', ({ hand }) => { botHand = hand; });
+        bot.on('updateHand', (hand) => { botHand = hand; });
+        bot.on('cardPlayed', (cards) => { leadSuit = cards.length > 0 ? cards[0].card.suit : null; });
+        bot.on('trickEnded', () => { leadSuit = null; });
+        bot.on('gameOver', () => { setTimeout(() => bot.emit('requestRematch'), 2000); });
+        bot.on('turnUpdate', ({ turn }) => {
+            if (turn === num && botHand.length > 0) {
+                setTimeout(() => {
+                    let idx = 0;
+                    if (leadSuit) {
+                        const match = botHand.findIndex(c => c.suit === leadSuit);
+                        if (match !== -1) idx = match;
+                    }
+                    bot.emit('playCard', idx);
+                }, 750);
+            }
+        });
+    }
+
+    function startSoloTest() {
+        const name = document.getElementById('playerName').value.trim() || 'Faizan';
+        const testCode = 'SOLO' + Math.floor(Math.random() * 9000 + 1000);
+        document.getElementById('joinForm').style.display = 'none';
+        document.getElementById('teamRoomBox').style.display = 'block';
+        document.getElementById('displayRoomCode').innerText = testCode;
+        socket.emit('joinRoom', { roomCode: testCode, playerName: name });
+        addBot(testCode, 1);
+        addBot(testCode, 2);
+        addBot(testCode, 3);
+    }
+
+    socket.on('updatePlayers', (players) => {
+        allPlayers = players;
+        document.getElementById('playerCount').innerText = players.length;
+        const me = players.find(p => p.id === socket.id);
+        if (me) myIndex = me.index;
+
+        for (let i = 0; i < 4; i++) {
+            const slot = document.getElementById('slot' + i);
+            if (players[i]) {
+                slot.innerText = `${players[i].name} ${players[i].id === socket.id ? '(You)' : ''}`;
+                slot.classList.add('filled');
+            } else {
+                slot.innerText = `Seat ${i + 1} (Empty)`;
+                slot.classList.remove('filled');
+            }
+        }
+
+        if (players.length === 4) {
+            document.getElementById('waitingHint').innerText = 'Sab players aa gaye! Game shuru ho rahi hai...';
+            setupVoice(players);
+        }
+    });
+
+    socket.on('shufflingStart', ({ dealerName }) => {
+        document.getElementById('gameOverModal').style.display = 'none';
+        document.getElementById('lobby').style.display = 'none';
+        document.getElementById('gameArea').style.display = 'flex';
+        document.getElementById('commsBar').style.display = 'flex';
+        document.getElementById('tableCards').innerHTML = '';
+        document.getElementById('trumpDisplay').innerText = '?';
+
+        document.getElementById('shuffleText').innerText = `${dealerName} Cards Shuffle Kar Raha Hai...`;
+        document.getElementById('shuffleOverlay').style.display = 'flex';
+        let shufInterval = setInterval(() => playTone('shuffle'), 300);
+        setTimeout(() => {
+            clearInterval(shufInterval);
+            document.getElementById('shuffleOverlay').style.display = 'none';
+        }, 2100);
+    });
+
+    function updateTableSeats(activeTurnIndex = -1) {
+        if (allPlayers.length < 4 || myIndex === -1) return;
+        const leftIdx = (myIndex + 1) % 4;
+        const partnerIdx = (myIndex + 2) % 4;
+        const rightIdx = (myIndex + 3) % 4;
+
+        const setSeat = (elId, pIdx, label) => {
+            const p = allPlayers[pIdx];
+            const el = document.getElementById(elId);
+            const dot = p.team === 'Team A' ? '<span class="dot-a"></span>' : '<span class="dot-b"></span>';
+            el.innerHTML = `${dot} ${p.name} (${label})`;
+            el.classList.toggle('active-turn', activeTurnIndex === pIdx);
+        };
+
+        setSeat('seatMe', myIndex, 'You');
+        setSeat('seatLeft', leftIdx, 'Left');
+        setSeat('seatPartner', partnerIdx, 'Partner');
+        setSeat('seatRight', rightIdx, 'Right');
+    }
+
+    socket.on('dealCards', ({ hand, phase, isTrumpSelector, trump, players }) => {
+        if (players) allPlayers = players;
+        currentHand = hand;
+        renderHand(currentHand);
+        updateTableSeats(-1);
+
+        if (phase === 'selectTrump' && isTrumpSelector) {
+            document.getElementById('trumpModal').style.display = 'flex';
+        }
+        if (trump) document.getElementById('trumpDisplay').innerText = trump;
+    });
+
+    function chooseTrump(suit) {
+        document.getElementById('trumpModal').style.display = 'none';
+        socket.emit('selectTrump', suit);
+    }
+
+    socket.on('trumpSelected', (suit) => {
+        document.getElementById('trumpDisplay').innerText = suit;
+        playTone('win');
+    });
+
+    socket.on('turnUpdate', ({ turn, playerName }) => {
+        updateTableSeats(turn);
+        if (turn === myIndex) {
+            document.getElementById('statusText').innerText = '👉 Aap ki Baari Hai!';
+            playTone('turn');
+        } else {
+            document.getElementById('statusText').innerText = `${playerName} ki baari hai...`;
+        }
+    });
+
+    socket.on('updateHand', (hand) => {
+        currentHand = hand;
+        renderHand(currentHand);
+    });
+
+    function sortMyHand() {
+        const suitOrder = { '♠': 1, '♥': 2, '♣': 3, '♦': 4 };
+        currentHand.sort((a, b) => {
+            if (suitOrder[a.suit] !== suitOrder[b.suit]) return suitOrder[a.suit] - suitOrder[b.suit];
+            return b.rank - a.rank;
+        });
+        renderHand(currentHand);
+        playTone('card');
+    }
+
+    function renderHand(hand) {
+        const handDiv = document.getElementById('playerHand');
+        handDiv.innerHTML = '';
+        hand.forEach((card, idx) => {
+            const isRed = card.suit === '♥' || card.suit === '♦';
+            const div = document.createElement('div');
+            div.className = `card ${isRed ? 'red' : ''}`;
+            div.innerHTML = `<span>${card.value}</span><span>${card.suit}</span>`;
+            div.onclick = () => socket.emit('playCard', idx);
+            handDiv.appendChild(div);
+        });
+    }
+
+    socket.on('cardPlayed', (cards) => {
+        playTone('card');
+        const table = document.getElementById('tableCards');
+        table.innerHTML = '';
+        cards.forEach(item => {
+            const isRed = item.card.suit === '♥' || item.card.suit === '♦';
+            table.innerHTML += `<div style="text-align:center;">
+                <div class="card table-card ${isRed ? 'red' : ''}"><span>${item.card.value}</span><span>${item.card.suit}</span></div>
+                <small style="font-size:10px; display:block; margin-top:2px;">${item.playerName}</small>
+            </div>`;
+        });
+    });
+
+    socket.on('trickEnded', ({ scores, pendingSirs, doubleSirScored, nextTurn, nextPlayerName }) => {
+        document.getElementById('tableCards').innerHTML = '';
+        document.getElementById('scoreA').innerText = scores.teamA;
+        document.getElementById('scoreB').innerText = scores.teamB;
+        document.getElementById('pendingSirs').innerText = pendingSirs;
+        if (doubleSirScored) playTone('win');
+        updateTableSeats(nextTurn);
+    });
+
+    socket.on('gameStatus', (msg) => {
+        document.getElementById('statusText').innerText = msg;
+    });
+
+    socket.on('errorMsg', (msg) => alert(msg));
+    socket.on('playerLeft', (msg) => {
+        alert(msg);
+        location.reload();
+    });
+
+    socket.on('gameOver', ({ winner, scoreA, scoreB }) => {
+        playTone('win');
+        document.getElementById('winnerBanner').innerText = `🏆 ${winner} Jeet Gayi!`;
+        document.getElementById('finalScoreText').innerText = `Team A: ${scoreA} Sirs  |  Team B: ${scoreB} Sirs`;
+        document.getElementById('gameOverModal').style.display = 'flex';
+    });
+
+    function requestRematch() {
+        socket.emit('requestRematch');
+    }
+
+    // Chat
+    function toggleChat() {
+        const box = document.getElementById('chatBox');
+        const isOpen = box.style.display === 'flex';
+        box.style.display = isOpen ? 'none' : 'flex';
+        if (!isOpen) document.getElementById('chatBadge').style.display = 'none';
+    }
+
+    function sendChat() {
+        const input = document.getElementById('chatInput');
+        if (!input.value.trim()) return;
+        socket.emit('chatMessage', input.value);
+        input.value = '';
+    }
+
+    socket.on('chatMessage', ({ sender, team, text }) => {
+        const msgs = document.getElementById('messages');
+        const color = team === 'Team A' ? '#3498db' : '#e74c3c';
+        msgs.innerHTML += `<div><b style="color:${color}">${sender}:</b> ${text}</div>`;
+        msgs.scrollTop = msgs.scrollHeight;
+        if (document.getElementById('chatBox').style.display !== 'flex') {
+            document.getElementById('chatBadge').style.display = 'inline';
+        }
+    });
+
+    // Voice Chat
+    async function setupVoice(players) {
+        try {
+            localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            localStream.getAudioTracks().enabled = false;
+            players.forEach(p => {
+                if (p.id !== socket.id && myIndex < p.index) createPeer(p.id, true);
+            });
+        } catch (e) {}
+    }
+
+    function createPeer(targetId, initiator) {
+        const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+        peers[targetId] = pc;
+        if (localStream) localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+        pc.onicecandidate = e => {
+            if (e.candidate) socket.emit('voiceSignal', { to: targetId, signal: { candidate: e.candidate } });
+        };
+        pc.ontrack = e => {
+            const audio = document.createElement('audio');
+            audio.srcObject = e.streams[0];
+            audio.autoplay = true;
+        };
+        if (initiator) {
+            pc.createOffer().then(offer => {
+                pc.setLocalDescription(offer);
+                socket.emit('voiceSignal', { to: targetId, signal: { sdp: offer } });
+            });
+        }
+    }
+
+    socket.on('voiceSignal', async ({ from, signal }) => {
+        if (!peers[from]) createPeer(from, false);
+        const pc = peers[from];
+        if (signal.sdp) {
+            await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+            if (signal.sdp.type === 'offer') {
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                socket.emit('voiceSignal', { to: from, signal: { sdp: answer } });
+            }
+        } else if (signal.candidate) {
+            await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+        }
+    });
+
+    function toggleMic() {
+        if (!localStream) return alert('Phone ki Settings mein ja kar Microphone permission Allow karein!');
+        const track = localStream.getAudioTracks()[0];
+        track.enabled = !track.enabled;
+        const btn = document.getElementById('micBtn');
+        btn.innerText = track.enabled ? '🎤 Mic On' : '🎤 Mic Off';
+        btn.classList.toggle('mic-active', track.enabled);
+    }
+</script>
+</body>
+</html>
