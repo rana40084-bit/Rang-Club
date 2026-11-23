@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rang Club - Double Sir</title>
-    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://socket.io"></script>
     <style>
         * { box-sizing: border-box; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; }
         body { background: #0b3d24; color: white; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
@@ -36,7 +36,7 @@
 <header>♠️ Rang Club (Double Sir) ♥️</header>
 
 <div id="lobby">
-    <p id="connStatus" style="font-size: 13px; color: #2ecc71;">Connecting to server...</p>
+    <p id="connStatus" style="font-size: 14px; color: #f1c40f; font-weight:bold;">Connecting to server...</p>
     <input type="text" id="playerName" placeholder="Apna Naam Likhein" />
     <input type="text" id="roomCode" placeholder="Room Code (e.g. 1234)" />
     <button onclick="joinGame()">Room Join Karein (4 Players)</button>
@@ -81,10 +81,13 @@
 </div>
 
 <script>
-    const socket = io({ transports: ['websocket', 'polling'] });
+    const SERVER_URL = "https://railway.app";
+    let socket;
     let myIndex = -1;
     let localStream;
     let peers = {};
+
+    socket = io(SERVER_URL, { transports: ['polling', 'websocket'] });
 
     socket.on('connect', () => {
         document.getElementById('connStatus').innerText = '✅ Server Connected!';
@@ -92,31 +95,9 @@
     });
 
     socket.on('connect_error', (err) => {
-        document.getElementById('connStatus').innerText = '❌ Server Connection Error: ' + err.message;
+        document.getElementById('connStatus').innerText = '❌ Error: ' + err.message;
         document.getElementById('connStatus').style.color = '#e74c3c';
     });
-
-    function joinGame() {
-        const name = document.getElementById('playerName').value.trim();
-        const code = document.getElementById('roomCode').value.trim().toUpperCase();
-        if (!name || !code) return alert('Naam aur Room Code dono likhein!');
-        document.getElementById('lobbyStatus').innerText = 'Joining room...';
-        socket.emit('joinRoom', { roomCode: code, playerName: name });
-    }
-
-    function startSoloTest() {
-        const name = document.getElementById('playerName').value.trim() || 'Faizan';
-        const testCode = 'TEST' + Math.floor(Math.random() * 1000);
-        socket.emit('joinRoom', { roomCode: testCode, playerName: name });
-        setTimeout(() => {
-            const botSocket2 = io({ transports: ['websocket', 'polling'] });
-            const botSocket3 = io({ transports: ['websocket', 'polling'] });
-            const botSocket4 = io({ transports: ['websocket', 'polling'] });
-            botSocket2.emit('joinRoom', { roomCode: testCode, playerName: 'Bot 2' });
-            botSocket3.emit('joinRoom', { roomCode: testCode, playerName: 'Bot 3' });
-            botSocket4.emit('joinRoom', { roomCode: testCode, playerName: 'Bot 4' });
-        }, 500);
-    }
 
     socket.on('updatePlayers', (players) => {
         document.getElementById('lobbyStatus').innerText = `Players Joined: ${players.length}/4 (${players.map(p => p.name).join(', ')})\nBaqi ${4 - players.length} players ka intezar hai...`;
@@ -139,11 +120,6 @@
         if (trump) document.getElementById('trumpDisplay').innerText = trump;
     });
 
-    function chooseTrump(suit) {
-        document.getElementById('trumpModal').style.display = 'none';
-        socket.emit('selectTrump', suit);
-    }
-
     socket.on('trumpSelected', (suit) => {
         document.getElementById('trumpDisplay').innerText = suit;
     });
@@ -153,19 +129,6 @@
     });
 
     socket.on('updateHand', renderHand);
-
-    function renderHand(hand) {
-        const handDiv = document.getElementById('playerHand');
-        handDiv.innerHTML = '';
-        hand.forEach((card, idx) => {
-            const isRed = card.suit === '♥' || card.suit === '♦';
-            const div = document.createElement('div');
-            div.className = `card ${isRed ? 'red' : ''}`;
-            div.innerHTML = `<span>${card.value}</span><span>${card.suit}</span>`;
-            div.onclick = () => socket.emit('playCard', idx);
-            handDiv.appendChild(div);
-        });
-    }
 
     socket.on('cardPlayed', (cards) => {
         const table = document.getElementById('tableCards');
@@ -188,3 +151,42 @@
 
     socket.on('gameStatus', (msg) => document.getElementById('statusText').innerText = msg);
     socket.on('errorMsg', (msg) => alert(msg));
+    socket.on('gameOver', (msg) => alert(msg));
+
+    socket.on('chatMessage', ({ sender, text }) => {
+        const msgs = document.getElementById('messages');
+        msgs.innerHTML += `<div><b>${sender}:</b> ${text}</div>`;
+        msgs.scrollTop = msgs.scrollHeight;
+    });
+
+    socket.on('voiceSignal', async ({ from, signal }) => {
+        if (!peers[from]) createPeer(from, false);
+        const pc = peers[from];
+        if (signal.sdp) {
+            await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+            if (signal.sdp.type === 'offer') {
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                socket.emit('voiceSignal', { to: from, signal: { sdp: answer } });
+            }
+        } else if (signal.candidate) {
+            await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+        }
+    });
+
+    function joinGame() {
+        const name = document.getElementById('playerName').value.trim();
+        const code = document.getElementById('roomCode').value.trim().toUpperCase();
+        if (!name || !code) return alert('Naam aur Room Code dono likhein!');
+        document.getElementById('lobbyStatus').innerText = 'Joining room...';
+        socket.emit('joinRoom', { roomCode: code, playerName: name });
+    }
+
+    function addBot(testCode, num) {
+        const bot = io(SERVER_URL, { transports: ['polling', 'websocket'] });
+        let botHand = [];
+        bot.emit('joinRoom', { roomCode: testCode, playerName: 'Bot ' + (num + 1) });
+        bot.on('dealCards', ({ hand }) => { botHand = hand; });
+        bot.on('updateHand', (hand) => { botHand = hand; });
+        bot.on('turnUpdate', (turn) => {
+            if (turn === num && botHand.length > 0) {
