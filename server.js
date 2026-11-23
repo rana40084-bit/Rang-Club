@@ -10,10 +10,7 @@ const io = new Server(server, {
 });
 
 app.use(express.static(__dirname));
-
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 const rooms = {};
 const SUITS = ['♠', '♥', '♦', '♣'];
@@ -22,9 +19,7 @@ const VALUES = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'
 function createDeck() {
     let deck = [];
     for (let s of SUITS) {
-        for (let i = 0; i < VALUES.length; i++) {
-            deck.push({ suit: s, value: VALUES[i], rank: i + 2 });
-        }
+        for (let i = 0; i < VALUES.length; i++) deck.push({ suit: s, value: VALUES[i], rank: i + 2 });
     }
     return deck.sort(() => Math.random() - 0.5);
 }
@@ -58,11 +53,8 @@ io.on('connection', (socket) => {
         const room = rooms[roomCode];
         room.deck = createDeck();
         room.scores = { teamA: 0, teamB: 0 };
-        room.pendingSirs = 0;
-        room.lastWinnerTeam = null;
-        room.trump = null;
-        room.turn = 0;
-
+        room.pendingSirs = 0; room.lastWinnerTeam = null;
+        room.trump = null; room.turn = 0; room.tableCards = [];
         room.players.forEach((p, idx) => {
             p.hand = room.deck.slice(idx * 5, (idx + 1) * 5);
             io.to(p.id).emit('dealCards', { hand: p.hand, phase: 'selectTrump', isTrumpSelector: idx === 0 });
@@ -75,8 +67,7 @@ io.on('connection', (socket) => {
         if (!room || socket.playerIndex !== 0) return;
         room.trump = suit;
         room.players.forEach((p, idx) => {
-            const extraCards = room.deck.slice(20 + idx * 8, 20 + (idx + 1) * 8);
-            p.hand = p.hand.concat(extraCards);
+            p.hand = p.hand.concat(room.deck.slice(20 + idx * 8, 20 + (idx + 1) * 8));
             io.to(p.id).emit('dealCards', { hand: p.hand, phase: 'playing', trump: suit });
         });
         io.to(socket.roomCode).emit('trumpSelected', suit);
@@ -91,8 +82,8 @@ io.on('connection', (socket) => {
         if (!card) return;
 
         if (room.tableCards.length > 0) {
-            const hasLeadSuit = player.hand.some(c => c.suit === room.leadSuit);
-            if (hasLeadSuit && card.suit !== room.leadSuit) {
+            const hasLead = player.hand.some(c => c.suit === room.leadSuit);
+            if (hasLead && card.suit !== room.leadSuit) {
                 socket.emit('errorMsg', `Aap ko ${room.leadSuit} chalna hoga!`);
                 return;
             }
@@ -109,52 +100,44 @@ io.on('connection', (socket) => {
             room.turn = (room.turn + 1) % 4;
             io.to(socket.roomCode).emit('turnUpdate', room.turn);
         } else {
-            setTimeout(() => evaluateTrick(socket.roomCode), 1500);
+            setTimeout(() => evaluateTrick(socket.roomCode), 1400);
         }
     });
 
     function evaluateTrick(roomCode) {
         const room = rooms[roomCode];
         if (!room) return;
-        let winningPlay = room.tableCards;
+        let win = room.tableCards;
         for (let i = 1; i < room.tableCards.length; i++) {
-            const current = room.tableCards[i];
-            const isCurrentTrump = current.card.suit === room.trump;
-            const isWinningTrump = winningPlay.card.suit === room.trump;
-            if (isCurrentTrump && !isWinningTrump) winningPlay = current;
-            else if (current.card.suit === winningPlay.card.suit && current.card.rank > winningPlay.card.rank) winningPlay = current;
+            const cur = room.tableCards[i];
+            if (cur.card.suit === room.trump && win.card.suit !== room.trump) win = cur;
+            else if (cur.card.suit === win.card.suit && cur.card.rank > win.card.rank) win = cur;
         }
-
-        const winnerTeam = winningPlay.playerIndex % 2 === 0 ? 'Team A' : 'Team B';
+        const winTeam = win.playerIndex % 2 === 0 ? 'Team A' : 'Team B';
         room.pendingSirs += 1;
 
-        if (room.lastWinnerTeam === winnerTeam) {
-            if (winnerTeam === 'Team A') room.scores.teamA += room.pendingSirs;
+        if (room.lastWinnerTeam === winTeam) {
+            if (winTeam === 'Team A') room.scores.teamA += room.pendingSirs;
             else room.scores.teamB += room.pendingSirs;
-            io.to(roomCode).emit('gameStatus', `${winnerTeam} ne Double Sir kar liya! (+${room.pendingSirs} Sirs)`);
-            room.pendingSirs = 0;
-            room.lastWinnerTeam = null;
+            io.to(roomCode).emit('gameStatus', `${winTeam} ne Double Sir kar liya! (+${room.pendingSirs})`);
+            room.pendingSirs = 0; room.lastWinnerTeam = null;
         } else {
-            room.lastWinnerTeam = winnerTeam;
-            io.to(roomCode).emit('gameStatus', `${winningPlay.playerName} (${winnerTeam}) ne haath jeeta. Pending Sirs: ${room.pendingSirs}`);
+            room.lastWinnerTeam = winTeam;
+            io.to(roomCode).emit('gameStatus', `${win.playerName} ne haath jeeta (Pending: ${room.pendingSirs})`);
         }
-
-        room.tableCards = [];
-        room.leadSuit = null;
-        room.turn = winningPlay.playerIndex;
-        io.to(roomCode).emit('trickEnded', { scores: room.scores, pendingSirs: room.pendingSirs, nextTurn: room.turn });
+        room.tableCards = []; room.leadSuit = null; room.turn = win.playerIndex;
+        io.to(roomCode).emit('trickEnded', { scores: room.scores, pendingSirs: room.pendingSirs });
 
         if (room.players.hand.length === 0) {
-            const finalWinner = room.scores.teamA > room.scores.teamB ? 'Team A' : 'Team B';
-            io.to(roomCode).emit('gameOver', `Game Khatam! ${finalWinner} Jeet Gayi!`);
+            const champ = room.scores.teamA > room.scores.teamB ? 'Team A' : 'Team B';
+            io.to(roomCode).emit('gameOver', `Game Khatam! ${champ} Jeet Gayi!`);
         }
     }
 
     socket.on('chatMessage', (msg) => {
         const room = rooms[socket.roomCode];
         if (!room) return;
-        const player = room.players[socket.playerIndex];
-        io.to(socket.roomCode).emit('chatMessage', { sender: player.name, text: msg });
+        io.to(socket.roomCode).emit('chatMessage', { sender: room.players[socket.playerIndex].name, text: msg });
     });
 
     socket.on('voiceSignal', (data) => {
@@ -163,4 +146,4 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => console.log(`Rang Club server running on port ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => console.log(`Running on ${PORT}`));
