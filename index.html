@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rang Club - Double Sir</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        * { box-sizing: border-box; font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; }
+        body { background: #0b3d24; color: white; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        header { background: #062415; padding: 12px; text-align: center; font-size: 20px; font-weight: bold; color: #f1c40f; border-bottom: 2px solid #f1c40f; }
+        #lobby { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 12px; padding: 20px; }
+        input { padding: 12px; border-radius: 8px; border: none; width: 270px; font-size: 16px; }
+        button { padding: 12px 20px; border-radius: 8px; border: none; background: #f1c40f; color: #062415; font-weight: bold; font-size: 16px; cursor: pointer; width: 270px; }
+        button.bot-btn { background: #2ecc71; color: white; }
+        button.join-btn { background: #3498db; color: white; }
+        #gameArea { display: none; flex: 1; flex-direction: column; justify-content: space-between; padding: 10px; position: relative; }
+        .top-bar { display: flex; justify-content: space-between; background: rgba(0,0,0,0.4); padding: 8px 12px; border-radius: 8px; font-size: 14px; }
+        .trump-badge { background: #e74c3c; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
+        .table-center { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 10px; }
+        .played-cards { display: flex; gap: 10px; min-height: 95px; }
+        .card { width: 55px; height: 80px; background: white; color: black; border-radius: 6px; display: flex; flex-direction: column; justify-content: center; align-items: center; font-weight: bold; font-size: 18px; box-shadow: 0 4px 6px rgba(0,0,0,0.4); cursor: pointer; user-select: none; }
+        .card.red { color: #d63031; }
+        .hand { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; padding: 10px 0; }
+        #trumpModal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); justify-content: center; align-items: center; flex-direction: column; gap: 15px; z-index: 100; }
+        .suit-btns { display: flex; gap: 15px; }
+        .suit-btn { font-size: 30px; padding: 15px 20px; background: white; border-radius: 10px; width: auto; }
+        .comms-bar { display: flex; gap: 8px; background: #062415; padding: 8px; align-items: center; }
+        .comms-bar button { width: auto; }
+        #chatBox { position: fixed; bottom: 55px; right: 10px; width: 250px; height: 180px; background: rgba(0,0,0,0.9); border-radius: 8px; display: none; flex-direction: column; padding: 8px; z-index: 50; }
+        #messages { flex: 1; overflow-y: auto; font-size: 13px; margin-bottom: 5px; }
+        .mic-active { background: #2ecc71 !important; color: white !important; }
+    </style>
+</head>
+<body>
+
+<header>♠️ Rang Club (Double Sir) ♥️</header>
+
+<div id="lobby">
+    <p style="color:#2ecc71; font-weight:bold;">✅ Ready to Play!</p>
+    <input type="text" id="playerName" placeholder="Apna Naam Likhein (e.g. Faizan)" />
+    <input type="text" id="roomCode" placeholder="Room Code (e.g. OFFICE1)" />
+    <button onclick="createRoom()">1. Naya Room Banayein (Host)</button>
+    <button class="join-btn" onclick="joinRoom()">2. Dost ka Room Join Karein</button>
+    <button class="bot-btn" onclick="startBotGame()">🤖 Akelay Khelein (Bots ke Sath)</button>
+    <p id="lobbyStatus" style="color: #f1c40f; text-align:center; font-weight:bold; max-width:300px;"></p>
+</div>
+
+<div id="trumpModal">
+    <h2>Rang (Trump) Select Karein:</h2>
+    <div class="suit-btns">
+        <button class="suit-btn" onclick="chooseTrump('♠')">♠</button>
+        <button class="suit-btn" style="color:red" onclick="chooseTrump('♥')">♥</button>
+        <button class="suit-btn" style="color:red" onclick="chooseTrump('♦')">♦</button>
+        <button class="suit-btn" onclick="chooseTrump('♣')">♣</button>
+    </div>
+</div>
+
+<div id="gameArea">
+    <div class="top-bar">
+        <div>Team A: <span id="scoreA">0</span> | Team B: <span id="scoreB">0</span></div>
+        <div>Pending: <span id="pendingSirs">0</span></div>
+        <div>Rang: <span id="trumpDisplay" class="trump-badge">?</span></div>
+    </div>
+    <div class="table-center">
+        <p id="statusText" style="color: #f1c40f; font-weight: bold; text-align: center;">Waiting...</p>
+        <div class="played-cards" id="tableCards"></div>
+    </div>
+    <div class="hand" id="playerHand"></div>
+</div>
+
+<div id="chatBox">
+    <div id="messages"></div>
+    <div style="display:flex; gap:4px;">
+        <input type="text" id="chatInput" placeholder="Message..." style="width:100%; padding:6px; font-size:13px;" />
+        <button onclick="sendChat()" style="padding:6px 10px; font-size:13px; width:auto;">Send</button>
+    </div>
+</div>
+
+<div class="comms-bar" id="commsBar" style="display:none;">
+    <button id="micBtn" onclick="toggleMic()" style="padding:8px 12px; font-size:14px;">🎤 Mic Off</button>
+    <button onclick="toggleChat()" style="padding:8px 12px; font-size:14px;">💬 Chat</button>
+</div>
+
+<script>
+    const SUITS = ['♠', '♥', '♦', '♣'];
+    const VALUES = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+    let peer, isHost = false, myIndex = 0, myName = '', roomCode = '';
+    let connections = [], hostConn = null, localStream = null, isBotMode = false;
+
+    let state = {
+        players: [], deck: [], trump: null, turn: 0,
+        tableCards: [], leadSuit: null, pendingSirs: 0,
+        lastWinnerTeam: null, scores: { teamA: 0, teamB: 0 }, status: ''
+    };
+
+    function createDeck() {
+        let deck = [];
+        for (let s of SUITS) {
+            for (let i = 0; i < VALUES.length; i++) deck.push({ suit: s, value: VALUES[i], rank: i + 2 });
+        }
+        return deck.sort(() => Math.random() - 0.5);
+    }
+
+    function startBotGame() {
+        isBotMode = true; isHost = true; myIndex = 0;
+        myName = document.getElementById('playerName').value.trim() || 'Faizan';
+        state.players = [
+            { name: myName, index: 0, hand: [] },
+            { name: 'Ali (Bot)', index: 1, hand: [] },
+            { name: 'Usman (Bot)', index: 2, hand: [] },
+            { name: 'Bilal (Bot)', index: 3, hand: [] }
+        ];
+        startGameHost();
+    }
+
+    function createRoom() {
+        myName = document.getElementById('playerName').value.trim();
+        roomCode = document.getElementById('roomCode').value.trim().toUpperCase();
+        if (!myName || !roomCode) return alert('Naam aur Room Code likhein!');
+        isHost = true; myIndex = 0;
+        document.getElementById('lobbyStatus').innerText = 'Room ban raha hai...';
+
+        peer = new Peer('rangclub-' + roomCode);
+        peer.on('open', () => {
+            state.players = [{ name: myName, index: 0, hand: [] }];
+            updateLobby();
+            setupMic();
+        });
+        peer.on('error', () => alert('Room Error: Ye code pehle se use ho raha hai, koi aur code rakhein!'));
+        peer.on('connection', (conn) => {
+            if (state.players.length >= 4) { conn.close(); return; }
+            connections.push(conn);
+            conn.on('data', (data) => handleHostData(conn, data));
+        });
+        peer.on('call', (call) => {
+            call.answer(localStream);
+            call.on('stream', playRemoteAudio);
+        });
+    }
+
+    function joinRoom() {
+        myName = document.getElementById('playerName').value.trim();
+        roomCode = document.getElementById('roomCode').value.trim().toUpperCase();
+        if (!myName || !roomCode) return alert('Naam aur Room Code likhein!');
+        isHost = false;
+        document.getElementById('lobbyStatus').innerText = 'Room se connect ho raha hai...';
+
+        peer = new Peer();
+        peer.on('open', () => {
+            setupMic();
+            hostConn = peer.connect('rangclub-' + roomCode);
+            hostConn.on('open', () => {
+                hostConn.send({ type: 'join', name: myName, peerId: peer.id });
+            });
+            hostConn.on('data', (data) => {
+                if (data.type === 'assignedIndex') myIndex = data.index;
+                if (data.type === 'state') { state = data.state; renderAll(); }
+                if (data.type === 'chat') appendChat(data.sender, data.text);
+                if (data.type === 'alert') alert(data.msg);
+            });
+        });
+        peer.on('call', (call) => {
+            call.answer(localStream);
+            call.on('stream', playRemoteAudio);
+        });
+    }
+
+    function handleHostData(conn, data) {
+        if (data.type === 'join') {
+            const idx = state.players.length;
+            state.players.push({ name: data.name, index: idx, hand: [], peerId: data.peerId });
+            conn.send({ type: 'assignedIndex', index: idx });
+            if (localStream && data.peerId) {
+                const call = peer.call(data.peerId, localStream);
+                call.on('stream', playRemoteAudio);
+            }
+            broadcastState();
+            if (state.players.length === 4) startGameHost();
+        }
+        if (data.type === 'playCard') processPlayCard(data.index, data.cardIndex);
+        if (data.type === 'chat') {
+            appendChat(data.sender, data.text);
+            connections.forEach(c => c.send(data));
+        }
+    }
+
+    function broadcastState() {
+        updateLobby();
+        renderAll();
+        connections.forEach(c => c.send({ type: 'state', state }));
+    }
+
+    function updateLobby() {
+        if (state.players.length < 4) {
+            const names = state.players.map(p => p.name).join(', ');
+            const left = 4 - state.players.length;
+            document.getElementById('lobbyStatus').innerText = "Room: " + roomCode + " | Players: " + state.players.length + "/4 (" + names + ") - Baqi " + left + " ka intezar hai...";
+        }
+    }
+
+    function startGameHost() {
+        state.deck = createDeck();
+        state.scores = { teamA: 0, teamB: 0 };
+        state.pendingSirs = 0; state.lastWinnerTeam = null;
+        state.trump = null; state.turn = 0; state.tableCards = [];
+        state.players.forEach((p, idx) => { p.hand = state.deck.slice(idx * 5, (idx + 1) * 5); });
+        state.status = state.players[0].name + " Rang (Trump) select karega...";
+        broadcastState();
+        document.getElementById('trumpModal').style.display = 'flex';
+    }
+
+    function chooseTrump(suit) {
+        document.getElementById('trumpModal').style.display = 'none';
+        state.trump = suit;
+        state.players.forEach((p, idx) => {
+            p.hand = p.hand.concat(state.deck.slice(20 + idx * 8, 20 + (idx + 1) * 8));
+        });
+        state.status = state.players[0].name + " ki baari hai!";
+        broadcastState();
+    }
+
+    function onCardClick(cardIdx) {
+        if (isHost) processPlayCard(myIndex, cardIdx);
+        else hostConn.send({ type: 'playCard', index: myIndex, cardIndex: cardIdx });
+    }
+
+    function processPlayCard(pIdx, cardIdx) {
+        if (pIdx !== state.turn || !state.trump) return;
+        const player = state.players[pIdx];
+        const card = player.hand[cardIdx];
+        if (!card) return;
+
+        if (state.tableCards.length > 0) {
+            const hasLead = player.hand.some(c => c.suit === state.leadSuit);
+            if (hasLead && card.suit !== state.leadSuit) {
+                if (pIdx === myIndex) alert("Aap ko " + state.leadSuit + " chalna hoga!");
+                return;
+            }
+        } else {
+            state.leadSuit = card.suit;
+        }
+
+        player.hand.splice(cardIdx, 1);
+        state.tableCards.push({ playerIndex: pIdx, playerName: player.name, card });
+
+        if (state.tableCards.length < 4) {
+            state.turn = (state.turn + 1) % 4;
+            state.status = state.players[state.turn].name + " ki baari hai...";
+            broadcastState();
+            if (isBotMode && state.turn !== 0) setTimeout(playBotTurn, 800);
+        } else {
+            broadcastState();
+            setTimeout(evaluateTrickHost, 1400);
+        }
+    }
+
+    function playBotTurn() {
+        const bot = state.players[state.turn];
+        let validIdx = 0;
+        if (state.leadSuit) {
+            const found = bot.hand.findIndex(c => c.suit === state.leadSuit);
+            if (found !== -1) validIdx = found;
+        }
+        processPlayCard(state.turn, validIdx);
+    }
+
+    function evaluateTrickHost() {
+        let win = state.tableCards[0];
+        for (let i = 1; i < state.tableCards.length; i++) {
+            const cur = state.tableCards[i];
+            if (cur.card.suit === state.trump && win.card.suit !== state.trump) win = cur;
+            else if (cur.card.suit === win.card.suit && cur.card.rank > win.card.rank) win = cur;
+        }
+        const winTeam = win.playerIndex % 2 === 0 ? 'Team A' : 'Team B';
+        state.pendingSirs += 1;
+
+        if (state.lastWinnerTeam === winTeam) {
+            if (winTeam === 'Team A') state.scores.teamA += state.pendingSirs;
+            else state.scores.teamB += state.pendingSirs;
+            state.status = winTeam + " ne Double Sir kar liya! (+" + state.pendingSirs + ")";
+            state.pendingSirs = 0; state.lastWinnerTeam = null;
+        } else {
+            state.lastWinnerTeam = winTeam;
+            state.status = win.playerName + " ne haath jeeta (Pending: " + state.pendingSirs + ")";
+        }
+
+        state.tableCards = []; state.leadSuit = null; state.turn = win.playerIndex;
+        broadcastState();
+
+        if (state.players[0].hand.length === 0) {
+            const champ = state.scores.teamA > state.scores.teamB ? 'Team A' : 'Team B';
+            alert("Game Khatam! " + champ + " Jeet Gayi!");
+        } else if (isBotMode && state.turn !== 0) {
+            setTimeout(playBotTurn, 1000);
+        }
+    }
+
+    function renderAll() {
+        if (state.players.length === 4) {
+            document.getElementById('lobby').style.display = 'none';
+            document.getElementById('gameArea').style.display = 'flex';
+            document.getElementById('commsBar').style.display = 'flex';
+        }
+        document.getElementById('scoreA').innerText = state.scores.teamA;
+        document.getElementById('scoreB').innerText = state.scores.teamB;
+        document.getElementById('pendingSirs').innerText = state.pendingSirs;
+        document.getElementById('trumpDisplay').innerText = state.trump || '?';
+        document.getElementById('statusText').innerText = state.turn === myIndex && state.trump ? "👉 Aap ki Baari Hai!" : state.status;
+
+        const table = document.getElementById('tableCards');
+        table.innerHTML = '';
+        state.tableCards.forEach(item => {
+            const isRed = item.card.suit === '♥' || item.card.suit === '♦';
+            const colorClass = isRed ? 'red' : '';
+            table.innerHTML += '<div style="text-align:center;"><div class="card ' + colorClass + '"><span>' + item.card.value + '</span><span>' + item.card.suit + '</span></div><small>' + item.playerName + '</small></div>';
+        });
+
+        const handDiv = document.getElementById('playerHand');
+        handDiv.innerHTML = '';
+        const myHand = state.players[myIndex] ? state.players[myIndex].hand : [];
+        myHand.forEach((card, idx) => {
+            const isRed = card.suit === '♥' || card.suit === '♦';
+            const div = document.createElement('div');
+            div.className = 'card ' + (isRed ? 'red' : '');
+            div.innerHTML = '<span>' + card.value + '</span><span>' + card.suit + '</span>';
+            div.onclick = () => onCardClick(idx);
+            handDiv.appendChild(div);
+        });
+    }
+
+    function toggleChat() {
+        const box = document.getElementById('chatBox');
+        box.style.display = box.style.display === 'flex' ? 'none' : 'flex';
+    }
+    function sendChat() {
+        const input = document.getElementById('chatInput');
+        if (!input.value.trim()) return;
+        const msg = { type: 'chat', sender: myName, text: input.value };
+        appendChat(myName, input.value);
+        if (isHost) connections.forEach(c => c.send(msg));
+        else if (hostConn) hostConn.send(msg);
+        input.value = '';
+    }
+    function appendChat(sender, text) {
+        const msgs = document.getElementById('messages');
+        msgs.innerHTML += '<div><b>' + sender + ':</b> ' + text + '</div>';
+        msgs.scrollTop = msgs.scrollHeight;
+    }
+    async function setupMic() {
+        try {
+            localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            localStream.getAudioTracks()[0].enabled = false;
+        } catch (e) {}
+    }
+    function playRemoteAudio(stream) {
+        const audio = document.createElement('audio');
+        audio.srcObject = stream; audio.autoplay = true;
+    }
+    function toggleMic() {
+        if (!localStream) return alert('Mic permission allow karein!');
+        const t = localStream.getAudioTracks()[0];
+        t.enabled = !t.enabled;
+        const btn = document.getElementById('micBtn');
+        btn.innerText = t.enabled ? '🎤 Mic On' : '🎤 Mic Off';
+        btn.classList.toggle('mic-active', t.enabled);
+    }
+</script>
+</body>
+</html>
