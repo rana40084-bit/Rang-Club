@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Rang Club - Royal Edition</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; user-select: none; }
+        body { background: #0f172a; color: white; height: 100vh; width: 100vw; overflow: hidden; display: flex; flex-direction: column; }
+
+        /* Force Landscape on Portrait Screens */
+        @media screen and (orientation: portrait) {
+            body {
+                transform: rotate(90deg);
+                transform-origin: bottom left;
+                position: absolute;
+                top: -100vw;
+                left: 0;
+                height: 100vw;
+                width: 100vh;
+            }
+        }
+
+        /* Top Bar */
+        .top-bar {
+            background: #1e293b; padding: 5px 12px; display: flex; justify-content: space-between;
+            align-items: center; border-bottom: 2px solid #334155; font-size: 12px; z-index: 50; height: 38px;
+        }
+        .badge { background: #0f172a; padding: 3px 8px; border-radius: 16px; border: 1px solid #475569; display: flex; align-items: center; gap: 5px; }
+        .vol-control { display: flex; align-items: center; gap: 6px; }
+        input[type="range"] { width: 65px; accent-color: #fbbf24; }
+        .btn-sm { background: #fbbf24; color: #000; border: none; padding: 3px 8px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 11px; }
+        .btn-mic { background: #ef4444; color: white; border: none; padding: 3px 10px; border-radius: 14px; font-weight: bold; cursor: pointer; font-size: 11px; }
+        .btn-mic.recording { background: #22c55e; box-shadow: 0 0 10px #22c55e; }
+
+        /* Main 3-Column Landscape Layout */
+        .main-container { flex: 1; display: flex; overflow: hidden; position: relative; }
+
+        /* Left Panel: Live Chat */
+        .chat-panel {
+            width: 185px; background: #1e293b; border-right: 2px solid #334155;
+            display: flex; flex-direction: column; z-index: 30;
+        }
+        .panel-header { background: #0f172a; padding: 6px; text-align: center; font-weight: bold; color: #fbbf24; border-bottom: 1px solid #334155; font-size: 12px; }
+        .chat-messages { flex: 1; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 5px; font-size: 11px; }
+        .chat-msg { background: #0f172a; padding: 5px 7px; border-radius: 6px; word-wrap: break-word; }
+        .quick-emojis { display: flex; justify-content: space-around; padding: 4px; background: #0f172a; border-top: 1px solid #334155; }
+        .emoji-btn { background: none; border: none; font-size: 15px; cursor: pointer; }
+        .chat-input-row { display: flex; padding: 4px; gap: 4px; background: #0f172a; }
+        .chat-input { flex: 1; background: #1e293b; border: 1px solid #475569; color: white; padding: 4px 6px; border-radius: 6px; font-size: 11px; outline: none; }
+
+        /* Center Game Table */
+        .game-area {
+            flex: 1; background: radial-gradient(circle, #15803d 0%, #064e3b 100%);
+            position: relative; display: flex; justify-content: center; align-items: center;
+            box-shadow: inset 0 0 60px rgba(0,0,0,0.7);
+        }
+
+        /* Status Banner (e.g. Chaal Mukammal) */
+        #status-toast {
+            position: absolute; top: 48px; left: 50%; transform: translateX(-50%);
+            background: rgba(15, 23, 42, 0.9); color: #fbbf24; padding: 4px 14px;
+            border-radius: 20px; border: 1px solid #fbbf24; font-size: 12px; font-weight: bold;
+            z-index: 60; display: none;
+        }
+
+        /* Lobby Overlay */
+        #lobby {
+            position: absolute; inset: 0; background: rgba(15, 23, 42, 0.96); z-index: 200;
+            display: flex; justify-content: center; align-items: center; padding: 12px;
+        }
+        .lobby-box { background: #1e293b; padding: 16px 20px; border-radius: 14px; width: 100%; max-width: 420px; border: 1px solid #475569; text-align: center; }
+        .avatar-grid { display: flex; justify-content: center; gap: 6px; margin: 8px 0; }
+        .av-opt { font-size: 22px; padding: 4px 8px; background: #0f172a; border: 2px solid transparent; border-radius: 8px; cursor: pointer; }
+        .av-opt.selected { border-color: #fbbf24; background: #334155; }
+        .input-row { display: flex; gap: 6px; margin: 6px 0; }
+        .input-box { flex: 1; padding: 8px; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: white; font-size: 13px; }
+        .btn-primary { width: 100%; padding: 9px; background: #fbbf24; color: #000; border: none; border-radius: 8px; font-weight: bold; font-size: 14px; cursor: pointer; margin-top: 6px; }
+
+        /* Player Seats */
+        .seat { position: absolute; display: flex; flex-direction: column; align-items: center; gap: 3px; z-index: 20; }
+        .seat-bottom { bottom: 92px; left: 50%; transform: translateX(-50%); }
+        .seat-top { top: 8px; left: 50%; transform: translateX(-50%); }
+        .seat-left { left: 8px; top: 50%; transform: translateY(-50%); }
+        .seat-right { right: 8px; top: 50%; transform: translateY(-50%); }
+
+        .player-tag {
+            background: rgba(15, 23, 42, 0.88); padding: 3px 9px; border-radius: 18px;
+            display: flex; align-items: center; gap: 6px; border: 2px solid #475569; font-size: 11px; position: relative;
+        }
+        .player-tag.active-turn { border-color: #fbbf24; box-shadow: 0 0 12px #fbbf24; }
+        .avatar-img { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; display: flex; align-items: center; justify-content: center; background: #334155; font-size: 14px; }
+
+        /* Chat Bubble over Player */
+        .chat-bubble {
+            position: absolute; bottom: 115%; left: 50%; transform: translateX(-50%);
+            background: #fbbf24; color: #0f172a; padding: 3px 8px; border-radius: 10px;
+            font-size: 11px; font-weight: bold; white-space: nowrap; box-shadow: 0 3px 8px rgba(0,0,0,0.4);
+            animation: popIn 0.2s ease; z-index: 80;
+        }
+
+        /* Center Deck & Shuffling Animation */
+        #deck-center {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 56px; height: 80px; z-index: 150; display: none;
+        }
+        .deck-card {
+            position: absolute; width: 56px; height: 80px;
+            background: repeating-linear-gradient(45deg, #b91c1c, #b91c1c 5px, #991b1b 5px, #991b1b 10px);
+            border: 2px solid #fbbf24; border-radius: 7px; box-shadow: 0 4px 10px rgba(0,0,0,0.6);
+            transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.35s;
+        }
+        @keyframes shuffleL { 0%, 100% { transform: translateX(0) rotate(0); } 50% { transform: translateX(-34px) rotate(-14deg); } }
+        @keyframes shuffleR { 0%, 100% { transform: translateX(0) rotate(0); } 50% { transform: translateX(34px) rotate(14deg); } }
+        .shuffling-1 { animation: shuffleL 0.22s ease-in-out 4; }
+        .shuffling-2 { animation: shuffleR 0.22s ease-in-out 4; }
+
+        /* Played Cards on Table with Slow Throw Animation */
+        #table-center { position: relative; width: 170px; height: 150px; display: flex; justify-content: center; align-items: center; }
+        .played-card {
+            position: absolute; width: 54px; height: 76px; background: white; color: black;
+            border-radius: 7px; display: flex; flex-direction: column; justify-content: space-between;
+            padding: 4px; font-weight: bold; font-size: 14px; box-shadow: 0 5px 12px rgba(0,0,0,0.6);
+            transition: all 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        .card-owner {
+            position: absolute; bottom: -15px; left: 50%; transform: translateX(-50%);
+            background: rgba(15, 23, 42, 0.9); color: #fbbf24; font-size: 9px;
+            padding: 1px 5px; border-radius: 6px; white-space: nowrap;
+        }
+        .pos-0 { bottom: 4px; }
+        .pos-1 { right: 4px; }
+        .pos-2 { top: 4px; }
+        .pos-3 { left: 4px; }
+
+        @keyframes throwFromBottom { from { transform: translateY(90px) scale(0.7); opacity: 0.3; } to { transform: translateY(0) scale(1); opacity: 1; } }
+        @keyframes throwFromRight  { from { transform: translateX(110px) scale(0.7); opacity: 0.3; } to { transform: translateX(0) scale(1); opacity: 1; } }
+        @keyframes throwFromTop    { from { transform: translateY(-90px) scale(0.7); opacity: 0.3; } to { transform: translateY(0) scale(1); opacity: 1; } }
+        @keyframes throwFromLeft   { from { transform: translateX(-110px) scale(0.7); opacity: 0.3; } to { transform: translateX(0) scale(1); opacity: 1; } }
+
+        .anim-0 { animation: throwFromBottom 0.45s ease-out; }
+        .anim-1 { animation: throwFromRight 0.45s ease-out; }
+        .anim-2 { animation: throwFromTop 0.45s ease-out; }
+        .anim-3 { animation: throwFromLeft 0.45s ease-out; }
+
+        /* My Hand */
+        #my-hand {
+            position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%);
+            display: flex; justify-content: center; z-index: 40; max-width: 96%;
+        }
+        .hand-card {
+            width: 54px; height: 80px; background: white; border-radius: 7px; border: 1px solid #cbd5e1;
+            margin-left: -15px; padding: 4px; display: flex; flex-direction: column; justify-content: space-between;
+            font-weight: bold; font-size: 15px; cursor: pointer; transition: transform 0.15s;
+            box-shadow: -2px 2px 6px rgba(0,0,0,0.4);
+        }
+        .hand-card:first-child { margin-left: 0; }
+        .hand-card:hover { transform: translateY(-14px); z-index: 45; }
+        .red { color: #dc2626; }
+        .black { color: #0f172a; }
+
+        /* Trump Selector Modal */
+        #trump-modal {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(15, 23, 42, 0.95); padding: 14px; border-radius: 12px;
+            border: 2px solid #fbbf24; z-index: 160; display: none; text-align: center;
+        }
+        .suit-btns { display: flex; gap: 10px; margin-top: 8px; }
+        .suit-btn { font-size: 24px; padding: 8px 14px; background: white; border: none; border-radius: 8px; cursor: pointer; }
+
+        /* Right Panel: Mukammal Sir */
+        .sir-panel {
+            width: 185px; background: #1e293b; border-left: 2px solid #334155;
+            display: flex; flex-direction: column; z-index: 30;
+        }
+        .sir-list { flex: 1; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+        .sir-item {
+            background: #0f172a; padding: 6px; border-radius: 7px; border-left: 4px solid #fbbf24;
+            display: flex; align-items: center; gap: 6px; font-size: 11px; animation: popIn 0.3s ease;
+        }
+
+        /* Mega Coat / Rang Coat Banner Overlay */
+        #coat-overlay {
+            position: fixed; inset: 0; background: rgba(0, 0, 0, 0.88); z-index: 500;
+            display: none; flex-direction: column; justify-content: center; align-items: center;
+            text-align: center; padding: 20px; animation: popIn 0.35s ease;
+        }
+        .coat-title {
+            font-size: 44px; font-weight: 900; color: #fbbf24;
+            text-shadow: 0 0 25px #ef4444, 0 4px 10px #000;
+            letter-spacing: 2px; margin-bottom: 10px;
+            animation: pulseScale 0.7s infinite alternate;
+        }
+        .coat-sub {
+            font-size: 22px; font-weight: bold; color: #ffffff;
+            background: #dc2626; padding: 8px 22px; border-radius: 30px;
+            border: 2px solid #fbbf24; box-shadow: 0 0 20px rgba(220, 38, 38, 0.8);
+        }
+        @keyframes pulseScale { from { transform: scale(0.96); } to { transform: scale(1.05); } }
+        @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    </style>
+</head>
+<body>
+
+    <div class="top-bar">
+        <div style="display:flex; gap:6px; align-items:center;">
+            <span class="badge">⚡ <b id="ping-ms">--</b> ms</span>
+            <span class="badge">Rang: <b id="trump-display" style="font-size:15px;">?</b></span>
+            <span class="badge">Score: <b id="score-display">A:0 | B:0</b></span>
+            <button class="btn-mic" id="mic-btn">🎤 Hold Mic</button>
+        </div>
+        <div class="vol-control">
+            <span>🔊 <b id="vol-label">150%</b></span>
+            <input type="range" id="vol-slider" min="0" max="200" value="150">
+            <button class="btn-sm" onclick="playSound('win')">🔔 Test</button>
+            <button class="btn-sm" style="background:#ef4444; color:white;" onclick="exitRoom()">Exit</button>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <!-- Left Chat Panel -->
+        <div class="chat-panel">
+            <div class="panel-header">💬 LIVE CHAT</div>
+            <div class="chat-messages" id="chat-messages"></div>
+            <div class="quick-emojis">
+                <button class="emoji-btn" onclick="sendQuick('👏')">👏</button>
+                <button class="emoji-btn" onclick="sendQuick('😂')">😂</button>
+                <button class="emoji-btn" onclick="sendQuick('🔥')">🔥</button>
+                <button class="emoji-btn" onclick="sendQuick('😎')">😎</button>
+                <button class="emoji-btn" onclick="sendQuick('🚑')">🚑</button>
+            </div>
+            <div class="chat-input-row">
+                <input type="text" id="chat-input" class="chat-input" placeholder="Message..." onkeypress="if(event.key==='Enter') sendChat()">
+                <button class="btn-sm" onclick="sendChat()">➤</button>
+            </div>
+        </div>
+
+        <!-- Center Table -->
+        <div class="game-area">
+            <div id="status-toast">👀 Chaal Mukammal - Sab Pattay Dekhein!</div>
+
+            <!-- Lobby -->
+            <div id="lobby">
+                <div class="lobby-box">
+                    <h2 style="color:#fbbf24; margin-bottom:4px; font-size:20px;">🃏 RANG CLUB</h2>
+                    <p style="font-size:11px; color:#94a3b8;">Avatar chunein ya Gallery se photo lagayein</p>
+                    <div class="avatar-grid" id="avatar-options">
+                        <div class="av-opt selected" data-av="👑">👑</div>
+                        <div class="av-opt" data-av="🦁">🦁</div>
+                        <div class="av-opt" data-av="🦅">🦅</div>
+                        <div class="av-opt" data-av="😎">😎</div>
+                        <div class="av-opt" data-av="🎩">🎩</div>
+                        <div class="av-opt" data-av="🔥">🔥</div>
+                    </div>
+                    <input type="file" id="photo-upload" accept="image/*" style="font-size:11px; margin:4px 0; color:#cbd5e1;">
+                    <div class="input-row">
+                        <input type="text" id="player-name" class="input-box" placeholder="Apna Naam..." value="Player">
+                        <input type="text" id="room-id" class="input-box" placeholder="Room Code" value="RANG1">
+                        <button class="btn-sm" onclick="generateNewRoom()">🔄 New</button>
+                    </div>
+                    <button class="btn-primary" onclick="joinGame()">Join Table</button>
+                    <button class="btn-primary" id="start-bots-btn" style="background:#22c55e; display:none;" onclick="startWithBots()">Start Game (New Bots)</button>
+                </div>
+            </div>
+
+            <div id="deck-center">
+                <div class="deck-card" id="d-card-1"></div>
+                <div class="deck-card" id="d-card-2"></div>
+                <div class="deck-card" id="d-card-3"></div>
+                <div class="deck-card" id="d-card-4"></div>
+            </div>
+
+            <div id="trump-modal">
+                <div style="font-weight:bold; color:#fbbf24; font-size:13px;">Rang (Trump) Chunein:</div>
+                <div class="suit-btns">
+                    <button class="suit-btn black" onclick="chooseTrump('♠')">♠</button>
+                    <button class="suit-btn red" onclick="chooseTrump('♥')">♥</button>
+                    <button class="suit-btn red" onclick="chooseTrump('♦')">♦</button>
+                    <button class="suit-btn black" onclick="chooseTrump('♣')">♣</button>
+                </div>
+            </div>
+
+            <div id="table-center"></div>
+
+            <div class="seat seat-bottom" id="seat-0"></div>
+            <div class="seat seat-right" id="seat-1"></div>
+            <div class="seat seat-top" id="seat-2"></div>
+            <div class="seat seat-left" id="seat-3"></div>
+
+            <div id="my-hand"></div>
+        </div>
+
+        <!-- Right Sir Panel -->
+        <div class="sir-panel">
+            <div class="panel-header">🏆 MUKAMMAL SIR</div>
+            <div class="sir-list" id="sir-list">
+                <div style="font-size:10px; color:#94a3b8; text-align:center; margin-top:15px;">
+                    2 lagatar haath jeetne par Sir yahan nazar aayega
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mega Coat / Rang Coat Banner -->
+    <div id="coat-overlay">
+        <div class="coat-title" id="coat-main-text">AMBULANCE BULAO! 13-0! 🚑🚨</div>
+        <div class="coat-sub" id="coat-sub-text">Team A ne 13-0 se Coat kar diya!</div>
+    </div>
+
+<script>
+    const socket = io({ transports: ['websocket'], reconnection: true });
+    let myRoom = 'RANG1';
+    let myName = 'Player';
+    let mySeat = 0;
+    let selectedAvatar = '👑';
+    let myCards = [];
+    let currentState = null;
+    let prevTableCount = 0;
+
+    function generateNewRoom() {
+        const code = 'RANG' + Math.floor(100 + Math.random() * 900);
+        document.getElementById('room-id').value = code;
+    }
+
+    function exitRoom() {
+        location.reload();
+    }
+
+    setInterval(() => {
+        const start = Date.now();
+        socket.emit('pingCheck', () => {
+            document.getElementById('ping-ms').innerText = Date.now() - start;
+        });
+    }, 2000);
+
+    // Web Audio Sound Synthesizer
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    let volumeMultiplier = 1.5;
+
+    document.getElementById('vol-slider').addEventListener('input', (e) => {
+        const val = e.target.value;
+        document.getElementById('vol-label').innerText = val + '%';
+        volumeMultiplier = val / 100;
+    });
+
+    function playSound(type) {
+        if (volumeMultiplier <= 0) return;
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        const now = audioCtx.currentTime;
+        const vol = Math.min(1.0, 0.35 * volumeMultiplier);
+
+        if (type === 'shuffle') {
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(160, now);
+            osc.frequency.exponentialRampToValueAtTime(60, now + 0.08);
+            gain.gain.setValueAtTime(vol, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+            osc.start(now); osc.stop(now + 0.08);
+        } else if (type === 'card') {
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(480, now);
+            osc.frequency.exponentialRampToValueAtTime(200, now + 0.09);
+            gain.gain.setValueAtTime(vol, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.09);
+            osc.start(now); osc.stop(now + 0.09);
+        } else if (type === 'win') {
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(523.25, now);
+            osc.frequency.setValueAtTime(659.25, now + 0.1);
+            osc.frequency.setValueAtTime(783.99, now + 0.2);
+            gain.gain.setValueAtTime(vol, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+            osc.start(now); osc.stop(now + 0.4);
+        }
+    }
+
+    // Voice Announcer (Sultan / Ambulance)
+    function speakSultan(text) {
+        if ('speechSynthesis' in window && volumeMultiplier > 0) {
+            window.speechSynthesis.cancel();
+            const msg = new SpeechSynthesisUtterance(text);
+            msg.rate = 0.95;
+            msg.pitch = 1.05;
+            msg.volume = Math.min(1, volumeMultiplier / 1.5);
+            window.speechSynthesis.speak(msg);
+        }
+    }
+
+    // Voice Chat (Hold Mic)
+    let mediaRecorder = null;
+    let audioChunks = [];
+    const micBtn = document.getElementById('mic-btn');
+
+    async function startRecording() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            audioChunks = [];
+            mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(audioChunks, { type: 'audio/webm' });
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    socket.emit('voiceData', { roomId: myRoom, audio: reader.result });
+                };
+                reader.readAsDataURL(blob);
+                stream.getTracks().forEach(t => t.stop());
+            };
+            mediaRecorder.start();
+            micBtn.classList.add('recording');
+            micBtn.innerText = '🎙️ Speaking...';
+        } catch (err) {
+            alert('Mic permission allow karein!');
+        }
+    }
+
+    function stopRecording() {
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            mediaRecorder.stop();
+        }
+        micBtn.classList.remove('recording');
+        micBtn.innerText = '🎤 Hold Mic';
+    }
+
+    micBtn.addEventListener('mousedown', startRecording);
+    micBtn.addEventListener('mouseup', stopRecording);
+    micBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecording(); });
+    micBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopRecording(); });
+
+    socket.on('voiceData', ({ audio }) => {
+        if (volumeMultiplier <= 0) return;
+        const snd = new Audio(audio);
+        snd.volume = Math.min(1, volumeMultiplier / 1.5);
+        snd.play();
+    });
+
+    // Chat Functions
+    function sendChat() {
+        const input = document.getElementById('chat-input');
+        const text = input.value.trim();
+        if (!text) return;
+        socket.emit('chatMessage', { roomId: myRoom, name: myName, text });
+        input.value = '';
+    }
+
+    function sendQuick(emoji) {
+        socket.emit('chatMessage', { roomId: myRoom, name: myName, text: emoji });
+    }
+
+    socket.on('chatMessage', ({ senderId, name, text }) => {
+        const box = document.getElementById('chat-messages');
+        const div = document.createElement('div');
+        div.className = 'chat-msg';
+        div.innerHTML = `<b style="color:#fbbf24;">${name}:</b> ${text}`;
+        box.appendChild(div);
+        box.scrollTop = box.scrollHeight;
+
+        if (currentState) {
+            const p = currentState.players.find(pl => pl.id === senderId);
+            if (p) {
+                const relPos = (p.seat - mySeat + 4) % 4;
+                const seatEl = document.getElementById(`seat-${relPos}`);
+                const tag = seatEl.querySelector('.player-tag');
+                if (tag) {
+                    const old = tag.querySelector('.chat-bubble');
+                    if (old) old.remove();
+                    const bubble = document.createElement('div');
+                    bubble.className = 'chat-bubble';
+                    bubble.innerText = text;
+                    tag.appendChild(bubble);
+                    setTimeout(() => bubble.remove(), 3000);
+                }
+            }
+        }
+    });
+
+    // Avatar Selection & Compression
+    document.querySelectorAll('.av-opt').forEach(el => {
+        el.onclick = () => {
+            document.querySelectorAll('.av-opt').forEach(x => x.classList.remove('selected'));
+            el.classList.add('selected');
+            selectedAvatar = el.dataset.av;
+        };
+    });
+
+    document.getElementById('photo-upload').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            const img = new Image();
+            img.onload = function() {
+                const canvas = document.createElement('canvas');
+                canvas.width = 64; canvas.height = 64;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, 64, 64);
+                selectedAvatar = canvas.toDataURL('image/jpeg', 0.7);
+            };
+            img.src = event.target.result;
+        };
+        reader.readAsDataURL(file);
+    });
+
+    function joinGame() {
+        myName = document.getElementById('player-name').value.trim() || 'Player';
+        myRoom = document.getElementById('room-id').value.trim().toUpperCase() || 'RANG1';
+        socket.emit('joinRoom', { roomId: myRoom, name: myName, avatar: selectedAvatar });
+        document.getElementById('start-bots-btn').style.display = 'block';
+    }
+
+    function startWithBots() {
+        socket.emit('startWithBots', myRoom);
+    }
+
+    function chooseTrump(suit) {
+        socket.emit('selectTrump', { roomId: myRoom, suit });
+        document.getElementById('trump-modal').style.display = 'none';
+    }
+
+    async function playShuffleAndDeal(cardCountPerPlayer, doShuffle, onComplete) {
+        const deck = document.getElementById('deck-center');
+        const c1 = document.getElementById('d-card-1');
+        const c2 = document.getElementById('d-card-2');
+        deck.style.display = 'block';
+
+        if (doShuffle) {
+            c1.classList.add('shuffling-1');
+            c2.classList.add('shuffling-2');
+            for (let s = 0; s < 4; s++) {
+                playSound('shuffle');
+                await new Promise(r => setTimeout(r, 220));
+            }
+            c1.classList.remove('shuffling-1');
+            c2.classList.remove('shuffling-2');
+        }
+
+        const targets = [
+            { x: '0px', y: '140px' },
+            { x: '180px', y: '0px' },
+            { x: '0px', y: '-140px' },
+            { x: '-180px', y: '0px' }
+        ];
+
+        const totalCards = cardCountPerPlayer * 4;
+        for (let i = 0; i < totalCards; i++) {
+            const fly = document.createElement('div');
+            fly.className = 'deck-card';
+            deck.appendChild(fly);
+
+            const t = targets[i % 4];
+            setTimeout(() => {
+                fly.style.transform = `translate(${t.x}, ${t.y}) scale(0.55) rotate(${i * 18}deg)`;
+                fly.style.opacity = '0';
+                playSound('card');
+            }, 20);
+
+            setTimeout(() => fly.remove(), 380);
+            await new Promise(r => setTimeout(r, 50));
+        }
+
+        deck.style.display = 'none';
+        if (onComplete) onComplete();
+    }
+
+    function renderAvatar(av) {
+        if (av && av.startsWith('data:image')) {
+            return `<img src="${av}" class="avatar-img">`;
+        }
+        return `<div class="avatar-img">${av || '👤'}</div>`;
+    }
+
+    function renderState(state) {
+        currentState = state;
+        if (!state) return;
+
+        const me = state.players.find(p => p.id === socket.id);
+        if (me) {
+            mySeat = me.seat;
+            if (state.status !== 'waiting') {
+                document.getElementById('lobby').style.display = 'none';
+            }
+        }
+
+        document.getElementById('trump-display').innerText = state.trump || '?';
+        document.getElementById('score-display').innerText = `A:${state.scores.A} | B:${state.scores.B}`;
+
+        // Toast when 4 cards are staying on table
+        const toast = document.getElementById('status-toast');
+        if (state.status === 'trick_stay') {
+            toast.style.display = 'block';
+        } else {
+            toast.style.display = 'none';
+        }
+
+        for (let i = 0; i < 4; i++) {
+            const relPos = (i - mySeat + 4) % 4;
+            const seatEl = document.getElementById(`seat-${relPos}`);
+            const p = state.players[i];
+            if (p) {
+                const isTurn = state.turn === i && state.status === 'playing';
+                seatEl.innerHTML = `
+                    <div class="player-tag ${isTurn ? 'active-turn' : ''}">
+                        ${renderAvatar(p.avatar)}
+                        <div>
+                            <div style="font-weight:bold;">${p.name}</div>
+                            <div style="font-size:9px; color:#fbbf24;">Team ${p.team} • ${p.cardCount}</div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                seatEl.innerHTML = '';
+            }
+        }
+
+        if (state.status === 'selecting_trump' && state.turn === mySeat) {
+            document.getElementById('trump-modal').style.display = 'block';
+        } else {
+            document.getElementById('trump-modal').style.display = 'none';
+        }
+
+        // Render Played Cards with Slow Throw Animation for the newly added card
+        const tableCenter = document.getElementById('table-center');
+        tableCenter.innerHTML = '';
+        state.tableCards.forEach((play, idx) => {
+            const relPos = (play.seat - mySeat + 4) % 4;
+            const isRed = play.card.suit === '♥' || play.card.suit === '♦';
+            const isNewest = idx === state.tableCards.length - 1 && state.tableCards.length > prevTableCount;
+            const div = document.createElement('div');
+            div.className = `played-card pos-${relPos} ${isRed ? 'red' : 'black'} ${isNewest ? 'anim-' + relPos : ''}`;
+            div.innerHTML = `
+                <div>${play.card.value}${play.card.suit}</div>
+                <div style="align-self:flex-end;">${play.card.suit}</div>
+                <div class="card-owner">${play.name}</div>
+            `;
+            tableCenter.appendChild(div);
+        });
+        prevTableCount = state.tableCards.length;
+
+        renderSirList(state.completedSirs);
+    }
+
+    function renderHand() {
+        const handEl = document.getElementById('my-hand');
+        handEl.innerHTML = '';
+        myCards.forEach(card => {
+            const isRed = card.suit === '♥' || card.suit === '♦';
+            const div = document.createElement('div');
+            div.className = `hand-card ${isRed ? 'red' : 'black'}`;
+            div.innerHTML = `<div>${card.value}<br>${card.suit}</div><div style="align-self:flex-end;">${card.suit}</div>`;
+            div.onclick = () => {
+                playSound('card');
+                socket.emit('playCard', { roomId: myRoom, card });
+            };
+            handEl.appendChild(div);
+        });
+    }
+
+    function renderSirList(sirs) {
+        const list = document.getElementById('sir-list');
+        if (!sirs || sirs.length === 0) return;
+        list.innerHTML = '';
+        sirs.forEach(s => {
+            const color = s.team === 'A' ? '#38bdf8' : '#f43f5e';
+            list.innerHTML += `
+                <div class="sir-item" style="border-left-color:${color};">
+                    ${renderAvatar(s.avatar)}
+                    <div>
+                        <div style="font-weight:bold; color:${color};">Team ${s.team} Sir!</div>
+                        <div>${s.playerName}</div>
+                        <div style="font-size:9px; color:#94a3b8;">Hands: ${s.handsCount} • ${s.time}</div>
+                    </div>
+                </div>
+            `;
+        });
+    }
+
+    socket.on('updateState', renderState);
+
+    socket.on('yourHand', (hand) => {
+        myCards = hand;
+    });
+
+    socket.on('roundStarted', ({ state }) => {
+        prevTableCount = 0;
+        document.getElementById('my-hand').innerHTML = '';
+        renderState(state);
+        playShuffleAndDeal(5, true, () => {
+            renderHand();
+        });
+    });
+
+    socket.on('secondDeal', ({ state }) => {
+        renderState(state);
+        playShuffleAndDeal(8, false, () => {
+            renderHand();
+        });
+    });
+
+    socket.on('cardPlayed', ({ state }) => {
+        playSound('card');
+        renderState(state);
+        renderHand();
+    });
+
+    socket.on('trickWon', ({ state }) => {
+        prevTableCount = 0;
+        playSound('win');
+        renderState(state);
+    });
+
+    socket.on('sirCompleted', () => {
+        playSound('win');
+    });
+
+    socket.on('roundOver', ({ winnerTeam, isCoat, isRangCoat }) => {
+        prevTableCount = 0;
+        playSound('win');
+        if (isCoat) {
+            const overlay = document.getElementById('coat-overlay');
+            const mainTxt = document.getElementById('coat-main-text');
+            const subTxt = document.getElementById('coat-sub-text');
+
+            if (isRangCoat) {
+                mainTxt.innerText = 'BAJA BAJ GAYA! 13-0! (G.C) 🎺😂';
+                subTxt.innerText = 'Hum hain Rang ke Sultan! Jao kisi aur ke sath khelo!';
+                speakSultan('Ha ha ha! Baja baj gaya! 13 zero! Hum hain Rang ke Sultan! Jao kisi aur ke sath khelo!');
+            } else {
+                mainTxt.innerText = 'AMBULANCE BULAO! 13-0! 🚑🚨';
+                subTxt.innerText = `Team ${winnerTeam} ne 13-0 se Coat kar diya!`;
+                speakSultan('Ambulance bulao! 13 zero! Team ' + winnerTeam + ' ne coat kar diya!');
+            }
+
+            overlay.style.display = 'flex';
+            setTimeout(() => {
+                overlay.style.display = 'none';
+            }, 4800);
+        }
+    });
+</script>
+</body>
+</html>
